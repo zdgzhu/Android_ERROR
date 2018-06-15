@@ -58,7 +58,7 @@ allprojects {
 
 ###错误3 AndroidManifest.xml 覆盖(合并)问题
 
-   3.1  出现问题时显示的代码
+   3.1  出现问题时显示的代码(2018.6.15)
 
 ```
 Error:java.lang.RuntimeException: Manifest merger failed : Attribute meta-data#android.support.VERSION@value value=(26.0.0) from [com.android.support:design:26.0.0] AndroidManifest.xml:28:13-35
