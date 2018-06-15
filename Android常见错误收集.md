@@ -14,7 +14,7 @@
 Error:Execution failed for task ':app:preDebugAndroidTestBuild'.
 ```
 
-![](C:\Users\dell\Desktop\a.png)
+   ! [图片](https://pan.baidu.com/s/1baK8jmYrrhd53aS9pVQXPA) 
 
 1.2  解决方法：在app下的build.gradle文件中的dependences {}中添加如下代码： 
 
