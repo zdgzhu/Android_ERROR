@@ -37,7 +37,7 @@ dependencies {
     }
 ```
 
-#### 错误2  一直停留在下载状态，添加阿里云镜像
+#### 错误2  一直停留在build.gradle(下载状态)，添加阿里云镜像
 
 2.1  **com.android.support:appcompat-v7:26.0.0以上无法下载的问题**
 
@@ -50,6 +50,17 @@ allprojects {
         maven{ url 'http://maven.aliyun.com/nexus/content/groups/public/'}
         google()
         jcenter()
+    }
+}
+
+
+allprojects {
+    repositories {
+        maven{ //如果下载还是比较慢，就考虑在该目录中也添加阿里云镜像
+            url 'http://maven.aliyun.com/nexus/content/groups/public/'
+        }
+        google()
+//        jcenter()
     }
 }
 ```
@@ -102,15 +113,54 @@ xmlns:tools="http://schemas.android.com/tools"
 </application>
 ```
 
+### 错误4 AndroidManifest.xml合并冲突(sdk)
 
+4.1 出现问题时的代码 (2018.6.16)
+
+```
+
+Manifest merger failed : uses-sdk:minSdkVersion 15 cannot be smaller than version 16 declared in library [cn.sharesdk:ShareSDK:3.2.0] C:\Users\Administrator\.gradle\caches\transforms-1\files-1.1\ShareSDK-3.2.0.aar\43ec3adb895d42769f73b236e54ee4be\AndroidManifest.xml as the library might be using APIs not available in 15
+	Suggestion: use a compatible library with a minSdk of at most 15,
+		or increase this project's minSdk version to at least 16,
+		or use tools:overrideLibrary="cn.sharesdk" to force usage (may lead to runtime failures)
+Manifest merger failed : uses-sdk:minSdkVersion 15 cannot be smaller than version 16 declared in library [cn.sharesdk:ShareSDK:3.2.0] C:\Users\Administrator\.gradle\caches\transforms-1\files-1.1\ShareSDK-3.2.0.aar\43ec3adb895d42769f73b236e54ee4be\AndroidManifest.xml as the library might be using APIs not available in 15
+	Suggestion: use a compatible library with a minSdk of at most 15,
+		or increase this project's minSdk version to at least 16,
+		or use tools:overrideLibrary="cn.sharesdk" to force usage (may lead to runtime failures)
+```
+
+![](D:\AndroidFile\Photo\error04_01.PNG)
+
+4.2 解决方法 在Manifest.xml的根节点，添加下面的代码
+
+```
+ <uses-sdk tools:overrideLibrary="cn.sharesdk,cn.sharesdk.onekeyshare" />
+ //大概是这样子
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.demotest">
+    //添加的代码
+    <uses-sdk tools:overrideLibrary="cn.sharesdk,cn.sharesdk.onekeyshare" />
+    <application
+        tools:replace="android:name"
+        ...
+        />
+</manifest>
+```
+
+4.3 出错原因
+
+​       出现这个错误的原因是我引入的第三方库最低支持版本高于我的项目的最低支持版本，异常中的信息显示：我的项目的最低支持版本为15（Android 4.0.3），而第三方库的最低支持版本为16（Android 4.1），所以抛出了这个异常 .
+
+​       在AndroidManifest.xml文件中 标签中添加<uses-sdktools:overrideLibrary="xxx.xxx.xxx"/>，其中的xxx.xxx.xxx为第三方库包名，如果存在多个库有此异常，则用逗号分割它们，例如：<uses-sdk tools:overrideLibrary="xxx.xxx.aaa, xxx.xxx.bbb"/>，这样做是为了项目中的AndroidManifest.xml和第三方库的AndroidManifest.xml合并时可以忽略最低版本限制。 
 
 
 
 ### 三 、常用操作
 
-1、查看gradle的依赖书的命令(2018.6.15)
+#### 1、查看gradle的依赖树的命令
 
-​     -1.1  在Terminal 中输入 以下命令
+​     -1.1  在Terminal 中输入 以下命令(2018.6.15)
 
 ```
 // 查看 compile 时的依赖关系 （compile 或者是 implementation）
@@ -129,3 +179,4 @@ gradlew :app:dependencies --configuration compile 
 
 ​    -1.2  [Gradle解决依赖冲突](https://www.jianshu.com/p/8d02da77c83d)
 
+####2、
