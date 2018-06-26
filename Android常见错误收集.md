@@ -16,7 +16,7 @@
 Error:Execution failed for task ':app:preDebugAndroidTestBuild'.
 ```
 
-   ![](D:\AndroidFile\Photo\error01_01.png) 
+   ![](D:\AndroidFile\Photo\Android常见错误收集\error01_01.png) 
 
 1.2  解决方法：在app下的build.gradle文件中的dependences {}中添加如下代码： 
 
@@ -75,7 +75,7 @@ allprojects {
 Error:java.lang.RuntimeException: Manifest merger failed : Attribute meta-data#android.support.VERSION@value value=(26.0.0) from [com.android.support:design:26.0.0] AndroidManifest.xml:28:13-35
 ```
 
-​       ![](D:\AndroidFile\Photo\error03_01.JPG)
+​       ![](D:\AndroidFile\Photo\Android常见错误收集\error03_01.JPG)
 
    或者下面的代码
 
@@ -86,7 +86,7 @@ Error:Execution failed for task ':app:processDebugManifest'.
   	Suggestion: add 'tools:replace="android:value"' to <meta-data> element at AndroidManifest.xml:26:9-28:38 to override.
 ```
 
-![](D:\AndroidFile\Photo\error03_02.JPG)
+![](D:\AndroidFile\Photo\Android常见错误收集\error03_02.JPG)
 
 3.2  解决方法：在Manifest.xml的根节点，添加下面的代码
 
@@ -129,7 +129,7 @@ Manifest merger failed : uses-sdk:minSdkVersion 15 cannot be smaller than versio
 		or use tools:overrideLibrary="cn.sharesdk" to force usage (may lead to runtime failures)
 ```
 
-![](D:\AndroidFile\Photo\error04_01.PNG)
+![](D:\AndroidFile\Photo\Android常见错误收集\error04_01.PNG)
 
 4.2 解决方法 在Manifest.xml的根节点，添加下面的代码
 
@@ -167,11 +167,11 @@ Manifest merger failed : uses-sdk:minSdkVersion 15 cannot be smaller than versio
 gradlew :app:dependencies --configuration compile   
 ```
 
-  ![](D:\AndroidFile\Photo\operat01_01.JPG)
+  ![](D:\AndroidFile\Photo\Android常见错误收集\operat01_01.JPG)
 
-![](D:\AndroidFile\Photo\operat01_02.JPG)
+![](D:\AndroidFile\Photo\Android常见错误收集\operat01_02.JPG)
 
-![](D:\AndroidFile\Photo\operat01_03.JPG)
+![](D:\AndroidFile\Photo\Android常见错误收集\operat01_03.JPG)
 
 
 
