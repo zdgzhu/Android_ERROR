@@ -489,6 +489,9 @@ public class MainActivity extends AppCompatActivity {
     private MyHandler mHandler = new MyHandler(this);
     private TextView mTextView ;
     private static class MyHandler extends Handler {
+  //为什么添加一个弱引用，因为在静态类中不能引用非静态的变量，
+  //但其实没这么简单。使用了以上代码之后，你会发现，由于Handler不再持有外部类对象的引用，导致程序不允
+  //许你在Handler中操作Activity中的对象了。所以你需要在Handler中增加一个对Activity的弱引用（WeakReference）：
         private WeakReference<Context> reference;
         public MyHandler(Context context) {
             reference = new WeakReference<>(context);
@@ -526,6 +529,10 @@ public class MainActivity extends AppCompatActivity {
 ```
 
 使用mHandler.removeCallbacksAndMessages(null);是移除消息队列中所有消息和所有的Runnable。当然也可以使用mHandler.removeCallbacks();或mHandler.removeMessages()；来移除指定的Runnable和Message。 
+
+**不添加弱引用时会报错**
+
+![](D:\AndroidFile\Photo\Android中内存泄漏的常见场景\leak_2.7.01.JPG)
 
 **解决方案总结**
 
@@ -597,6 +604,17 @@ LeakCanary 是 Square 公司开源的「Android 和 Java 的内存泄漏检测�
 ###参考资料：
 
 - [Android泄漏及解决方案](https://www.jianshu.com/p/65f914e6a2f8)
+
 - [Android 性能优化：手把手带你全面了解内存泄露](https://link.jianshu.com/?t=https%3A%2F%2Fjuejin.im%2Fpost%2F5a652d31518825734108080d)
+
 - [系统剖析Android中的内存泄漏](https://link.jianshu.com/?t=https%3A%2F%2Fdroidyue.com%2Fblog%2F2016%2F11%2F23%2Fmemory-leaks-in-android%2F)
+
 - [Android 内存泄露分析](https://link.jianshu.com/?t=https%3A%2F%2Fjuejin.im%2Fentry%2F58805842b123db0061cdb82b)
+
+- [Android 内存泄漏查找和解决](https://juejin.im/entry/589542ed2f301e0069054007)
+
+- [Android Studio 3.0 Memory Profiler使用](https://www.jianshu.com/p/e75680772375)
+
+- [AndroidStudio3.0 Android Profiler分析器(cpu memory network 分析器)](https://blog.csdn.net/niubitianping/article/details/72617864/)
+
+  
