@@ -533,6 +533,108 @@ public final class Dispatcher {
 
 ```
 
+#### 3.3 OkHttp 拦截器
+
+#####3.3.1 拦截器定义
+
+```
+1、简单回顾同步/异步
+(1)同步请求就是执行请求的操作是阻塞式，直到HTTP响应返回
+(2)异步请求就类似于非阻塞式的请求，它的执行结果一般都是通过接口回调的方式告知调用者
+(3)官网：拦截器是OkHttp中提供一种强大机制，它可以实现网络监听，请求以及响应重写，请求失败重试等功能
+```
+
+##### 3.3.2 拦截器分类
+
+![](D:\AndroidFile\Photo\OkHttp\okhttp_拦截器02.png)
+
+- **RetryAndFollowUpInterceptor**
+
+    用来实现连接失败的重试和重定向
+
+- **BridgeInterceptor**
+
+  用来修改请求和响应的header信息
+
+- **CacheInterceptor**
+
+  用来实现响应缓存。比如获取到的 Response 带有 Date，Expires，Last-Modified，Etag 等 header，表示该 Response 可以缓存一定的时间，下次请求就可以不需要发往服务端，直接拿缓存的 .
+
+- **ConectInterceptor**
+
+用来打开到服务端的连接。其实是调用了 StreamAllocation 的`newStream` 方法来打开连接的。建联的 TCP 握手，TLS 握手都发生该阶段。过了这个阶段，和服务端的 socket 连接打通 
+
+- **CallServerInterceptor**
+
+用来发起请求并且得到响应。上一个阶段已经握手成功，HttpStream 流已经打开，所以这个阶段把 Request 的请求信息传入流中，并且从流中读取数据封装成 Response 返回
+
+
+
+#####3.3.3  getResponseWithInterceptorChain()分析
+
+```
+Response getResponseWithInterceptorChain() throws IOException {
+    // Build a full stack of interceptors.
+    List<Interceptor> interceptors = new ArrayList<>();
+    interceptors.addAll(client.interceptors());
+    interceptors.add(retryAndFollowUpInterceptor);
+    interceptors.add(new BridgeInterceptor(client.cookieJar()));
+    interceptors.add(new CacheInterceptor(client.internalCache()));
+    interceptors.add(new ConnectInterceptor(client));
+    if (!forWebSocket) {
+      interceptors.addAll(client.networkInterceptors());
+    }
+    interceptors.add(new CallServerInterceptor(forWebSocket));
+
+    Interceptor.Chain chain = new RealInterceptorChain(interceptors, null, null, null, 0,
+        originalRequest, this, eventListener, client.connectTimeoutMillis(),
+        client.readTimeoutMillis(), client.writeTimeoutMillis());
+
+    return chain.proceed(originalRequest);
+  }
+```
+
+注意点：
+
+- 方法的返回值的response，这个就是网络请求的目的，得到的数据都封装在Response对象中。
+- 拦截器的使用，在方法的第一行中就创建了interceptors集合，然后紧接着放进去很多拦截器对象
+- RealInterceptorChain类的proceed方法，getResponseWithInterceptorChain方法的最后创建了RealInterceptorChain对象，并调用proceed方法。Response 对象就有由RealInterceptorChain类的proceed方法返回的。 
+
+
+
+##### 3.3.4 proceed()源码解析
+
+```
+public Response proceed(Request request, StreamAllocation streamAllocation, HttpCodec httpCodec,
+      RealConnection connection) throws IOException {
+    if (index >= interceptors.size()) throw new AssertionError();
+   ...
+    RealInterceptorChain next = new RealInterceptorChain(interceptors, streamAllocation, httpCodec,
+        connection, index + 1, request, call, eventListener, connectTimeout, readTimeout,
+        writeTimeout);
+    Interceptor interceptor = interceptors.get(index);
+    Response response = interceptor.intercept(next);
+    ...
+    }
+```
+
+
+
+#####3.3.5 OkHttp拦截器--总结1
+
+- 1、创建 一系列拦截器，并将其放入其中一个拦截器list中（包含了应用拦截器和网络拦截器）
+- 2、创建一个拦截器链RealInterceptorChain,并执行拦截器链的proceed方法，这个proceed方法的核心就是创建下一个拦截器。
+
+ ##### 3.3.6 OkHttp拦截器--总2
+
+- 1、在发起请求钱，对request进行处理
+
+- 2、调用下一个拦截器，获取response
+
+- 3、对response进行处理，返回给上一个拦截
+
+  
+
 
 
 
