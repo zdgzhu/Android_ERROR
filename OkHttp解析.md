@@ -550,38 +550,135 @@ public final class Dispatcher {
 
 - **RetryAndFollowUpInterceptor**
 
-    用来实现连接失败的重试和重定向
+    用来实现连接失败的重试和重定向;负责两个部分的逻辑：
+
+    (1)在网络请求失败后进行重试
+
+    (2)当服务器返回当前请求需要进行重定向时直接发起新的请求， 并在条件允许情况下复用当前连接
+
+    **源码主要的操作：**
+
+    (1)创建StreamAllocation对象
+
+    (2)调用RealInterceptorChain.proceed(...)进行网络请求
+
+    (3)根据异常结果或者响应结果判断是否要进行重新请求
+
+    (4)调用下一个拦截器，对response进行处理，返回给上一个拦截器
 
 - **BridgeInterceptor**
 
-  用来修改请求和响应的header信息
+  ​        这个Interceptor做的事情比较简单。可以分为发送请求和收到响应两个阶段来看。在发送请求阶段，BridgeInterceptor补全一些http header，这主要包括`Content-Type`、`Content-Length`、`Transfer-Encoding`、`Host`、`Connection`、`Accept-Encoding`、`User-Agent`，还加载`Cookie`，随后创建新的Request，并交给后续的Interceptor处理，以获取响应。
+
+  而在从后续的Interceptor获取响应之后，会首先保存`Cookie`。如果服务器返回的响应的content是以gzip压缩过的，则会先进行解压缩，移除响应中的header `Content-Encoding`和`Content-Length`，构造新的响应并返回；否则直接返回响应。
+
+  `CookieJar`来自于`OkHttpClient`，它是OkHttp的`Cookie`管理器，负责`Cookie`的存取：
+
+   
+
+  用来修改请求和响应的header信息；主要负责以下几部分内容
+
+  (1)设置内容长度，内容编码
+
+  (2)设置gzip压缩，并在接收到内容后进行解压，省去了应用层处理数据解压的麻烦
+
+  (3)添加cookie
+
+  (4)设置其他抱头，如User-Agent,Host,keep-alive等，其中keep-alive是实现多路复用的必要步骤。
+
+  **源码的核心步骤**
+
+  (1)是负责将用户构建的一个Request请求转化成能够进行网络访问的请求
+
+  (2)将这个符合网络请求的Request进行网络请求
+
+  (3)将网络请求回来的响应Response转化为用户可用的Response.
 
 - **CacheInterceptor**
 
   用来实现响应缓存。比如获取到的 Response 带有 Date，Expires，Last-Modified，Etag 等 header，表示该 Response 可以缓存一定的时间，下次请求就可以不需要发往服务端，直接拿缓存的 .
 
+  **主要负责以下几部分内容 ： **
+
+  (1)当网络请求有符合要求的Cache时，直接返回Cache管理
+
+  (2)当服务器返回内容有改变时，更新当前cache
+
+  (3)如果当前cache失效，删除
+
 - **ConectInterceptor**
 
-用来打开到服务端的连接。其实是调用了 StreamAllocation 的`newStream` 方法来打开连接的。建联的 TCP 握手，TLS 握手都发生该阶段。过了这个阶段，和服务端的 socket 连接打通 
+(1)用来打开到服务端的连接。其实是调用了 StreamAllocation 的`newStream` 方法来打开连接的。建联的 TCP 握手，TLS 握手都发生该阶段。过了这个阶段，和服务端的 socket 连接打通 
+
+(2) intercept源码解析
+
+这个类的定义看上去倒是蛮简洁的。ConnectInterceptor的主要职责是建立与服务器之间的连接，但这个事情它主要是委托给StreamAllocation来完成的。如我们前面看到的，StreamAllocation对象是在RetryAndFollowUpInterceptor中分配的。
+
+ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnection对象，随后便调用了realChain.proceed()，向连接中写入HTTP请求，并从服务器读回响应。
+
+```
+ @Override public Response intercept(Chain chain) throws IOException {
+    RealInterceptorChain realChain = (RealInterceptorChain) chain;
+    Request request = realChain.request();
+    StreamAllocation streamAllocation = realChain.streamAllocation();
+
+    // We need the network to satisfy this request. Possibly for validating a conditional GET.
+    boolean doExtensiveHealthChecks = !request.method().equals("GET");
+    HttpCodec httpCodec = streamAllocation.newStream(client, chain, doExtensiveHealthChecks);
+   //关键代码
+   //即为当前请求找到合适的连接，可能复用已有连接也可能是重新创建的连接，返回的连接由连接池负责决定。
+   RealConnection connection = streamAllocation.connection();
+
+    return realChain.proceed(request, streamAllocation, httpCodec, connection);
+  }
+```
+
+(3)ConnectInterceptor获取Interceptor传过来的StreamAllocation,streamAllocation.newStream()
+
+(4)将刚才创建的用于网络IO的RealConnection对象，以及对于与服务器交互最为关键的HttpCodec等对象传递给后面的拦截器
+
+(5)**总结**
+
+```
+1、弄一个RealConnection对象
+2、选择不同的连接方式
+3、CallServerInterceptor
+```
+
+
 
 - **CallServerInterceptor**
 
-用来发起请求并且得到响应。上一个阶段已经握手成功，HttpStream 流已经打开，所以这个阶段把 Request 的请求信息传入流中，并且从流中读取数据封装成 Response 返回
+(1)用来发起请求并且得到响应。上一个阶段已经握手成功，HttpStream 流已经打开，所以这个阶段把 Request 的请求信息传入流中，并且从流中读取数据封装成 Response 返回
 
+(2)CallServerInterceptor负责向服务器发起真正的访问请求，并在接收到服务器返回后读取响应返回。 
 
+(3)`CallServerInterceptor`首先将http请求头部发给服务器，如果http请求有body的话，会再将body发送给服务器，继而通过`httpStream.finishRequest()`结束http请求的发送。
 
-#####3.3.3  getResponseWithInterceptorChain()分析
+随后便是从连接中读取服务器返回的http响应，并构造Response。
+
+如果请求的header或服务器响应的header中，`Connection`值为`close`，`CallServerInterceptor`还会关闭连接。
+
+最后便是返回Response。
+
+##### 3.3.3 整个网络访问的核心 流程图
+
+![](D:\AndroidFile\Photo\OkHttp\okhttp_拦截器03.png)
+
+#####3.3.4  getResponseWithInterceptorChain()分析
 
 ```
 Response getResponseWithInterceptorChain() throws IOException {
     // Build a full stack of interceptors.
     List<Interceptor> interceptors = new ArrayList<>();
+    //应用拦截器
     interceptors.addAll(client.interceptors());
     interceptors.add(retryAndFollowUpInterceptor);
     interceptors.add(new BridgeInterceptor(client.cookieJar()));
     interceptors.add(new CacheInterceptor(client.internalCache()));
     interceptors.add(new ConnectInterceptor(client));
     if (!forWebSocket) {
+    //网络拦截器
       interceptors.addAll(client.networkInterceptors());
     }
     interceptors.add(new CallServerInterceptor(forWebSocket));
@@ -602,7 +699,7 @@ Response getResponseWithInterceptorChain() throws IOException {
 
 
 
-##### 3.3.4 proceed()源码解析
+##### 3.3.5 proceed()源码解析
 
 ```
 public Response proceed(Request request, StreamAllocation streamAllocation, HttpCodec httpCodec,
@@ -618,14 +715,38 @@ public Response proceed(Request request, StreamAllocation streamAllocation, Http
     }
 ```
 
+##### 3.3.6 StreamAllocation 源码解析
+
+- StreamAllocation 
+
+  (1)用来建立http请求所需要的那些网络的组件的，从名字可以看出来，这个是分配Stream的;
+
+  (2)这个StreamAllocation虽然是在RetryAndFollowUpInterceptor拦截器中创建好了，但是，并没有被使用到，真正使用的地方是后面的ConnectInterceptor拦截器中；
+
+  (3)主要就是用于获取连接服务器的connection和 用于服务端用于传输的输入输出流；
+
+```
+ public StreamAllocation(ConnectionPool connectionPool, Address address, Call call,
+      EventListener eventListener, Object callStackTrace) {
+    this.connectionPool = connectionPool;
+    this.address = address;
+    this.call = call;
+    this.eventListener = eventListener;
+    this.routeSelector = new RouteSelector(address, routeDatabase(), call, eventListener);
+    this.callStackTrace = callStackTrace;
+  }
+```
 
 
-#####3.3.5 OkHttp拦截器--总结1
+
+
+
+#####3.3.7 OkHttp拦截器--总结1
 
 - 1、创建 一系列拦截器，并将其放入其中一个拦截器list中（包含了应用拦截器和网络拦截器）
-- 2、创建一个拦截器链RealInterceptorChain,并执行拦截器链的proceed方法，这个proceed方法的核心就是创建下一个拦截器。
+- 2、创建一个拦截器链RealInterceptorChain,并执行拦截器链的proceed方法，这个proceed方法的核心就是创建下一个拦截器链。
 
- ##### 3.3.6 OkHttp拦截器--总2
+ ##### 3.3.8 OkHttp拦截器--总结2
 
 - 1、在发起请求钱，对request进行处理
 
