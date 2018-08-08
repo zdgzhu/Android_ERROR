@@ -300,10 +300,6 @@ final class AsyncCall extends NamedRunnable {
 
 
 
-
-
-
-
 #####3.1.8 Enqueue方法总结
 
 ```
@@ -312,21 +308,21 @@ final class AsyncCall extends NamedRunnable {
 3：client.dispatcher().enqueue()
 ```
 
-#### 3.2 Dispatcher 总体分析(任务调度核心)
+###4、Okhttp调度器Dispatcher源码分析
 
-##### 3.2.1 okhttp如何实现同步异步的请求？
+####4.1 okhttp如何实现同步异步的请求？
 
 ```
 发送的同步/异步请求都会在dispatcher管理器状态
 ```
 
-##### 3.2.2 到底什么是dispatcher ?
+####4.2 到底什么是dispatcher ?
 
 ```
 dispatcher 的作用为维护请求的状态，并维护一个线程池，用于执行请求
 ```
 
-##### 3.2.3异步请求为什么需要两个队列 ?
+####4.3 异步请求为什么需要两个队列 ?
 
 ```
 一个是readyAsyncCalls，runningAsyncCalls，可以理解为生产者，消费者
@@ -335,16 +331,14 @@ dispatcher 的作用为维护请求的状态，并维护一个线程池，用于
 
 ```
 
-##### 3.2.4 readyAsyncCalls 队列中的线程在什么时候才会被执行呢？ 
+####4.4 readyAsyncCalls 队列中的线程在什么时候才会被执行呢？
 
 ```
 问题背景：Call执行完肯定需要在runningAsyncCalls队列中移除这个线程，如果不删除的话，后面等待缓存队列就没法添加进来
 
 ```
 
-
-
-##### 3.2.5 dispatcher 源码分析
+####4.5 dispatcher 源码分析
 
 ```
 public final class Dispatcher {
@@ -533,9 +527,9 @@ public final class Dispatcher {
 
 ```
 
-#### 3.3 OkHttp 拦截器
+###5、OkHttp拦截器Interceptor源码分析
 
-#####3.3.1 拦截器定义
+####5.1 拦截器定义
 
 ```
 1、简单回顾同步/异步
@@ -544,69 +538,249 @@ public final class Dispatcher {
 (3)官网：拦截器是OkHttp中提供一种强大机制，它可以实现网络监听，请求以及响应重写，请求失败重试等功能
 ```
 
-##### 3.3.2 拦截器分类
+####5.2 getResponseWithInterceptorChain()分析
+
+```
+Response getResponseWithInterceptorChain() throws IOException {
+    // Build a full stack of interceptors.
+    List<Interceptor> interceptors = new ArrayList<>();
+    //应用拦截器
+    interceptors.addAll(client.interceptors());
+    interceptors.add(retryAndFollowUpInterceptor);
+    interceptors.add(new BridgeInterceptor(client.cookieJar()));
+    interceptors.add(new CacheInterceptor(client.internalCache()));
+    interceptors.add(new ConnectInterceptor(client));
+    if (!forWebSocket) {
+    //网络拦截器
+      interceptors.addAll(client.networkInterceptors());
+    }
+    interceptors.add(new CallServerInterceptor(forWebSocket));
+
+    Interceptor.Chain chain = new RealInterceptorChain(interceptors, null, null, null, 0,
+        originalRequest, this, eventListener, client.connectTimeoutMillis(),
+        client.readTimeoutMillis(), client.writeTimeoutMillis());
+
+    return chain.proceed(originalRequest);
+  }Response getResponseWithInterceptorChain() throws IOException {
+
+```
+
+注意点：
+
+- 方法的返回值的response，这个就是网络请求的目的，得到的数据都封装在Response对象中。
+- 拦截器的使用，在方法的第一行中就创建了interceptors集合，然后紧接着放进去很多拦截器对象
+- RealInterceptorChain类的proceed方法，getResponseWithInterceptorChain方法的最后创建了RealInterceptorChain对象，并调用proceed方法。Response 对象就有由RealInterceptorChain类的proceed方法返回的。 
+
+##### 5.2.1 proceed()源码解析
+
+```
+public Response proceed(Request request, StreamAllocation streamAllocation, HttpCodec httpCodec,
+      RealConnection connection) throws IOException {
+    if (index >= interceptors.size()) throw new AssertionError();
+   ...
+    RealInterceptorChain next = new RealInterceptorChain(interceptors, streamAllocation, httpCodec,
+        connection, index + 1, request, call, eventListener, connectTimeout, readTimeout,
+        writeTimeout);
+    Interceptor interceptor = interceptors.get(index);
+    Response response = interceptor.intercept(next);
+    ...
+    }
+```
+
+##### 5.2.2  StreamAllocation 源码解析
+
+```
+ public StreamAllocation(ConnectionPool connectionPool, Address address, Call call,
+      EventListener eventListener, Object callStackTrace) {
+    this.connectionPool = connectionPool;
+    this.address = address;
+    this.call = call;
+    this.eventListener = eventListener;
+    this.routeSelector = new RouteSelector(address, routeDatabase(), call, eventListener);
+    this.callStackTrace = callStackTrace;
+  }
+```
+
+
+
+
+
+####5.3 拦截器流程图
+
+#####5.3.1 六大拦截器运行图
 
 ![](D:\AndroidFile\Photo\OkHttp\okhttp_拦截器02.png)
 
-- **RetryAndFollowUpInterceptor**
 
-    用来实现连接失败的重试和重定向;负责两个部分的逻辑：
 
-    (1)在网络请求失败后进行重试
+##### 5.3.2 整个网络访问的核心 流程图
 
-    (2)当服务器返回当前请求需要进行重定向时直接发起新的请求， 并在条件允许情况下复用当前连接
+![](D:\AndroidFile\Photo\OkHttp\okhttp_拦截器03.png)
 
-    **源码主要的操作：**
+####5.4 RetryAndFollowUpInterceptor
 
-    (1)创建StreamAllocation对象
+用来实现连接失败的重试和重定向;负责两个部分的逻辑：
 
-    (2)调用RealInterceptorChain.proceed(...)进行网络请求
+(1)在网络请求失败后进行重试
 
-    (3)根据异常结果或者响应结果判断是否要进行重新请求
+(2)当服务器返回当前请求需要进行重定向时直接发起新的请求， 并在条件允许情况下复用当前连接
 
-    (4)调用下一个拦截器，对response进行处理，返回给上一个拦截器
+**源码主要的操作：**
 
-- **BridgeInterceptor**
+(1)创建StreamAllocation对象
 
-  ​        这个Interceptor做的事情比较简单。可以分为发送请求和收到响应两个阶段来看。在发送请求阶段，BridgeInterceptor补全一些http header，这主要包括`Content-Type`、`Content-Length`、`Transfer-Encoding`、`Host`、`Connection`、`Accept-Encoding`、`User-Agent`，还加载`Cookie`，随后创建新的Request，并交给后续的Interceptor处理，以获取响应。
+(2)调用RealInterceptorChain.proceed(...)进行网络请求
 
-  而在从后续的Interceptor获取响应之后，会首先保存`Cookie`。如果服务器返回的响应的content是以gzip压缩过的，则会先进行解压缩，移除响应中的header `Content-Encoding`和`Content-Length`，构造新的响应并返回；否则直接返回响应。
+(3)根据异常结果或者响应结果判断是否要进行重新请求
 
-  `CookieJar`来自于`OkHttpClient`，它是OkHttp的`Cookie`管理器，负责`Cookie`的存取：
+(4)调用下一个拦截器，对response进行处理，返回给上一个拦截器
 
-   
+####5.5 BridgeInterceptor
 
-  用来修改请求和响应的header信息；主要负责以下几部分内容
+```
+Response.Builder responseBuilder = networkResponse.newBuilder()
+        .request(userRequest);
+    //判断服务器是否支持gzip压缩格式,如果支持则交给kio压缩
+    if (transparentGzip&& "gzip".equalsIgnoreCase(networkResponse.header("Content-Encoding"))
+        && HttpHeaders.hasBody(networkResponse)) {
+      GzipSource responseBody = new GzipSource(networkResponse.body().source());
+      Headers strippedHeaders = networkResponse.headers().newBuilder()
+          .removeAll("Content-Encoding")
+          .removeAll("Content-Length")
+          .build();
+      responseBuilder.headers(strippedHeaders);
+      responseBuilder.body(new RealResponseBody(strippedHeaders, Okio.buffer(responseBody)));
+    }
 
-  (1)设置内容长度，内容编码
+    return responseBuilder.build();
+```
 
-  (2)设置gzip压缩，并在接收到内容后进行解压，省去了应用层处理数据解压的麻烦
+​     BridgeInterceptor拿到CacheInterceoptor返回的response之后根据请求头的Content-Encoding类型来决定返回的类型，如果是gzip,则将response经过GzipSource 处理后将其Response的body设置为RealResponseBody对象，否则就简单的返回response。  简单流程如下：  
 
-  (3)添加cookie
+![](D:\AndroidFile\Photo\OkHttp\okhttp_拦截器04.png)
 
-  (4)设置其他抱头，如User-Agent,Host,keep-alive等，其中keep-alive是实现多路复用的必要步骤。
+   这个Interceptor做的事情比较简单。可以分为发送请求和收到响应两个阶段来看。在发送请求阶段，BridgeInterceptor补全一些http header，这主要包括`Content-Type`、`Content-Length`、`Transfer-Encoding`、`Host`、`Connection`、`Accept-Encoding`、`User-Agent`，还加载`Cookie`，随后创建新的Request，并交给后续的Interceptor处理，以获取响应。
 
-  **源码的核心步骤**
+而在从后续的Interceptor获取响应之后，会首先保存`Cookie`。如果服务器返回的响应的content是以gzip压缩过的，则会先进行解压缩，移除响应中的header `Content-Encoding`和`Content-Length`，构造新的响应并返回；否则直接返回响应。
 
-  (1)是负责将用户构建的一个Request请求转化成能够进行网络访问的请求
+`CookieJar`来自于`OkHttpClient`，它是OkHttp的`Cookie`管理器，负责`Cookie`的存取：
 
-  (2)将这个符合网络请求的Request进行网络请求
+ 
 
-  (3)将网络请求回来的响应Response转化为用户可用的Response.
+用来修改请求和响应的header信息；主要负责以下几部分内容
 
-- **CacheInterceptor**
+(1)设置内容长度，内容编码
 
-  用来实现响应缓存。比如获取到的 Response 带有 Date，Expires，Last-Modified，Etag 等 header，表示该 Response 可以缓存一定的时间，下次请求就可以不需要发往服务端，直接拿缓存的 .
+(2)设置gzip压缩，并在接收到内容后进行解压，省去了应用层处理数据解压的麻烦
 
-  **主要负责以下几部分内容 ： **
+(3)添加cookie
 
-  (1)当网络请求有符合要求的Cache时，直接返回Cache管理
+(4)设置其他抱头，如User-Agent,Host,keep-alive等，其中keep-alive是实现多路复用的必要步骤。
 
-  (2)当服务器返回内容有改变时，更新当前cache
+**源码的核心步骤**
 
-  (3)如果当前cache失效，删除
+(1)是负责将用户构建的一个Request请求转化成能够进行网络访问的请求
 
-- **ConectInterceptor**
+(2)将这个符合网络请求的Request进行网络请求
+
+(3)将网络请求回来的响应Response转化为用户可用的Response.
+
+####5.6 CacheInterceptor
+
+##### 5.6.1 OkHttp缓存策略源码分析
+
+
+
+用来实现响应缓存。比如获取到的 Response 带有 Date，Expires，Last-Modified，Etag 等 header，表示该 Response 可以缓存一定的时间，下次请求就可以不需要发往服务端，直接拿缓存的 .
+
+**主要负责以下几部分内容 ： **
+
+(1)当网络请求有符合要求的Cache时，直接返回Cache管理
+
+(2)当服务器返回内容有改变时，更新当前cache
+
+(3)如果当前cache失效，删除
+
+```
+Response intercept(Chain chain) throws IOException {
+    //如果配置了缓存：优先从缓存中读取Response
+    Response cacheCandidate = cache != null
+        ? cache.get(chain.request())
+        : null;
+    long now = System.currentTimeMillis();
+    //缓存策略，该策略通过某种规则来判断缓存是否有效
+   CacheStrategy strategy = new CacheStrategy.Factory(now, chain.request(), cacheCandidate).get();
+    Request networkRequest = strategy.networkRequest;
+    Response cacheResponse = strategy.cacheResponse;
+    。。。。
+    //如果根据缓存策略strategy禁止使用网络，并且缓存无效，直接返回空的Response
+    if (networkRequest == null && cacheResponse == null) {
+      return new Response.Builder()
+          。。。
+          .code(504)
+          .message("Unsatisfiable Request (only-if-cached)")
+          .body(Util.EMPTY_RESPONSE)//空的body
+          。。。
+          .build();
+    }
+
+    //如果根据缓存策略strategy禁止使用网络，且有缓存则直接使用缓存
+    if (networkRequest == null) {
+      return cacheResponse.newBuilder()
+          .cacheResponse(stripBody(cacheResponse))
+          .build();
+    }
+
+    //需要网络
+    Response networkResponse = null;
+    try {//执行下一个拦截器，发起网路请求
+      networkResponse = chain.proceed(networkRequest);
+    } finally {
+      。。。
+    }
+
+    //本地有缓存，
+    if (cacheResponse != null) {
+      //并且服务器返回304状态码（说明缓存还没过期或服务器资源没修改）
+      if (networkResponse.code() == HTTP_NOT_MODIFIED) {
+        //使用缓存数据
+        Response response = cacheResponse.newBuilder()
+            。。。
+            .build();
+          。。。。
+         //返回缓存 
+        return response;
+      } else {
+        closeQuietly(cacheResponse.body());
+      }
+    }
+
+    //如果网络资源已经修改：使用网络响应返回的最新数据
+    Response response = networkResponse.newBuilder()
+        .cacheResponse(stripBody(cacheResponse))
+        .networkResponse(stripBody(networkResponse))
+        .build();
+
+    //将最新的数据缓存起来
+    if (cache != null) {
+      if (HttpHeaders.hasBody(response) && CacheStrategy.isCacheable(response, networkRequest)) {
+
+        CacheRequest cacheRequest = cache.put(response);
+        return cacheWritingResponse(cacheRequest, response);
+      }
+      。。。。
+   //返回最新的数据
+    return response;
+  }
+```
+
+简单的总结下上面的代码都做了些神马：  1、如果在初始化OkhttpClient的时候配置缓存，则从缓存中取caceResponse  2、将当前请求request和caceResponse 构建一个CacheStrategy对象  3、CacheStrategy这个策略对象将根据相关规则来决定caceResponse和Request是否有效，如果无效则分别将caceResponse和request设置为null  4、经过CacheStrategy的处理(步骤3），如果request和caceResponse都置空，直接返回一个状态码为504，且body为Util.EMPTY_RESPONSE的空Respone对象  5、经过CacheStrategy的处理(步骤3），resquest 为null而cacheResponse不为null，则直接返回cacheResponse对象  6、执行下一个拦截器发起网路请求，  7、如果服务器资源没有过期（状态码304）且存在缓存，则返回缓存  8、将网络返回的最新的资源（networkResponse）缓存到本地，然后返回networkResponse.  
+
+####5.7 ConectInterceptor
+
+#### 5.7.1 Okhttp 连接池ConnectionPool原理解析
+
+
 
 (1)用来打开到服务端的连接。其实是调用了 StreamAllocation 的`newStream` 方法来打开连接的。建联的 TCP 握手，TLS 握手都发生该阶段。过了这个阶段，和服务端的 socket 连接打通 
 
@@ -647,7 +821,7 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 
 
 
-- **CallServerInterceptor**
+####5.8 CallServerInterceptor
 
 (1)用来发起请求并且得到响应。上一个阶段已经握手成功，HttpStream 流已经打开，所以这个阶段把 Request 的请求信息传入流中，并且从流中读取数据封装成 Response 返回
 
@@ -661,92 +835,14 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 
 最后便是返回Response。
 
-##### 3.3.3 整个网络访问的核心 流程图
+####5.9 总结
 
-![](D:\AndroidFile\Photo\OkHttp\okhttp_拦截器03.png)
-
-#####3.3.4  getResponseWithInterceptorChain()分析
-
-```
-Response getResponseWithInterceptorChain() throws IOException {
-    // Build a full stack of interceptors.
-    List<Interceptor> interceptors = new ArrayList<>();
-    //应用拦截器
-    interceptors.addAll(client.interceptors());
-    interceptors.add(retryAndFollowUpInterceptor);
-    interceptors.add(new BridgeInterceptor(client.cookieJar()));
-    interceptors.add(new CacheInterceptor(client.internalCache()));
-    interceptors.add(new ConnectInterceptor(client));
-    if (!forWebSocket) {
-    //网络拦截器
-      interceptors.addAll(client.networkInterceptors());
-    }
-    interceptors.add(new CallServerInterceptor(forWebSocket));
-
-    Interceptor.Chain chain = new RealInterceptorChain(interceptors, null, null, null, 0,
-        originalRequest, this, eventListener, client.connectTimeoutMillis(),
-        client.readTimeoutMillis(), client.writeTimeoutMillis());
-
-    return chain.proceed(originalRequest);
-  }
-```
-
-注意点：
-
-- 方法的返回值的response，这个就是网络请求的目的，得到的数据都封装在Response对象中。
-- 拦截器的使用，在方法的第一行中就创建了interceptors集合，然后紧接着放进去很多拦截器对象
-- RealInterceptorChain类的proceed方法，getResponseWithInterceptorChain方法的最后创建了RealInterceptorChain对象，并调用proceed方法。Response 对象就有由RealInterceptorChain类的proceed方法返回的。 
-
-
-
-##### 3.3.5 proceed()源码解析
-
-```
-public Response proceed(Request request, StreamAllocation streamAllocation, HttpCodec httpCodec,
-      RealConnection connection) throws IOException {
-    if (index >= interceptors.size()) throw new AssertionError();
-   ...
-    RealInterceptorChain next = new RealInterceptorChain(interceptors, streamAllocation, httpCodec,
-        connection, index + 1, request, call, eventListener, connectTimeout, readTimeout,
-        writeTimeout);
-    Interceptor interceptor = interceptors.get(index);
-    Response response = interceptor.intercept(next);
-    ...
-    }
-```
-
-##### 3.3.6 StreamAllocation 源码解析
-
-- StreamAllocation 
-
-  (1)用来建立http请求所需要的那些网络的组件的，从名字可以看出来，这个是分配Stream的;
-
-  (2)这个StreamAllocation虽然是在RetryAndFollowUpInterceptor拦截器中创建好了，但是，并没有被使用到，真正使用的地方是后面的ConnectInterceptor拦截器中；
-
-  (3)主要就是用于获取连接服务器的connection和 用于服务端用于传输的输入输出流；
-
-```
- public StreamAllocation(ConnectionPool connectionPool, Address address, Call call,
-      EventListener eventListener, Object callStackTrace) {
-    this.connectionPool = connectionPool;
-    this.address = address;
-    this.call = call;
-    this.eventListener = eventListener;
-    this.routeSelector = new RouteSelector(address, routeDatabase(), call, eventListener);
-    this.callStackTrace = callStackTrace;
-  }
-```
-
-
-
-
-
-#####3.3.7 OkHttp拦截器--总结1
+#####5.9.1 OkHttp拦截器--总结1
 
 - 1、创建 一系列拦截器，并将其放入其中一个拦截器list中（包含了应用拦截器和网络拦截器）
 - 2、创建一个拦截器链RealInterceptorChain,并执行拦截器链的proceed方法，这个proceed方法的核心就是创建下一个拦截器链。
 
- ##### 3.3.8 OkHttp拦截器--总结2
+ ##### 5.9.2 OkHttp拦截器--总结2
 
 - 1、在发起请求钱，对request进行处理
 
@@ -754,103 +850,19 @@ public Response proceed(Request request, StreamAllocation streamAllocation, Http
 
 - 3、对response进行处理，返回给上一个拦截
 
-  
 
 
 
 
 
-### 4、OkHttp核心类OkhttpClient/call 解析
+### 6 Okhttp网络底层详解
 
+####6.1 Address源码分析 
 
+####6.2 StreamAllocation源码分析 
 
-### 5、Okhttp 连接池ConnectionPool原理解析
+####6.3 httpCodec 源码分析
 
 
 
-### 6、Okhttp调度器Dispatcher源码分析
-
-
-
-### 7、OkHttp任务调度和调度模型分析 
-
-
-
-
-
-### 8、OkHttp拦截器Interceptor源码分析 
-
-
-
-
-
-### 9、OkHttp缓存策略源码分析 
-
-
-
-### 10、OkHttp链接复用原理分析 
-
-
-
-### 11、Okhttp网络底层详解（Address/StreamAllocation/httpCodec） 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+10、OkHttp链接复用原理分析
