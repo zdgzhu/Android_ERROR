@@ -774,17 +774,31 @@ Response intercept(Chain chain) throws IOException {
   }
 ```
 
-简单的总结下上面的代码都做了些神马：  1、如果在初始化OkhttpClient的时候配置缓存，则从缓存中取caceResponse  2、将当前请求request和caceResponse 构建一个CacheStrategy对象  3、CacheStrategy这个策略对象将根据相关规则来决定caceResponse和Request是否有效，如果无效则分别将caceResponse和request设置为null  4、经过CacheStrategy的处理(步骤3），如果request和caceResponse都置空，直接返回一个状态码为504，且body为Util.EMPTY_RESPONSE的空Respone对象  5、经过CacheStrategy的处理(步骤3），resquest 为null而cacheResponse不为null，则直接返回cacheResponse对象  6、执行下一个拦截器发起网路请求，  7、如果服务器资源没有过期（状态码304）且存在缓存，则返回缓存  8、将网络返回的最新的资源（networkResponse）缓存到本地，然后返回networkResponse.  
+简单的总结下上面的代码都做了些神马： 
+
+1、如果在初始化OkhttpClient的时候配置缓存，则从缓存中取caceResponse 
+
+2、将当前请求request和caceResponse 构建一个CacheStrategy对象  
+
+3、CacheStrategy这个策略对象将根据相关规则来决定caceResponse和Request是否有效，如果无效则分别将caceResponse和request设置为null  
+
+4、经过CacheStrategy的处理(步骤3），如果request和caceResponse都置空，直接返回一个状态码为504，且body为Util.EMPTY_RESPONSE的空Respone对象  
+
+5、经过CacheStrategy的处理(步骤3），resquest 为null而cacheResponse不为null，则直接返回cacheResponse对象  
+
+6、执行下一个拦截器发起网路请求，  
+
+7、如果服务器资源没有过期（状态码304）且存在缓存，则返回缓存  
+
+8、将网络返回的最新的资源（networkResponse）缓存到本地，然后返回networkResponse.  
 
 ####5.7 ConectInterceptor
 
-#### 5.7.1 Okhttp 连接池ConnectionPool原理解析
+#####5.7.1 源码解析
 
+(1)用来打开到服务端的连接。其实是调用了 StreamAllocation 的`newStream` 方法来打开连接的。关联的 TCP 握手，TLS 握手都发生该阶段。过了这个阶段，和服务端的 socket 连接打通 
 
-
-(1)用来打开到服务端的连接。其实是调用了 StreamAllocation 的`newStream` 方法来打开连接的。建联的 TCP 握手，TLS 握手都发生该阶段。过了这个阶段，和服务端的 socket 连接打通 
-
-(2) intercept源码解析
+(2) ConectInterceptor源码解析
 
 这个类的定义看上去倒是蛮简洁的。ConnectInterceptor的主要职责是建立与服务器之间的连接，但这个事情它主要是委托给StreamAllocation来完成的。如我们前面看到的，StreamAllocation对象是在RetryAndFollowUpInterceptor中分配的。
 
@@ -794,15 +808,15 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
  @Override public Response intercept(Chain chain) throws IOException {
     RealInterceptorChain realChain = (RealInterceptorChain) chain;
     Request request = realChain.request();
+    //从拦截器中得到StreamAllocation对象
     StreamAllocation streamAllocation = realChain.streamAllocation();
-
-    // We need the network to satisfy this request. Possibly for validating a conditional GET.
+    //
     boolean doExtensiveHealthChecks = !request.method().equals("GET");
     HttpCodec httpCodec = streamAllocation.newStream(client, chain, doExtensiveHealthChecks);
    //关键代码
    //即为当前请求找到合适的连接，可能复用已有连接也可能是重新创建的连接，返回的连接由连接池负责决定。
    RealConnection connection = streamAllocation.connection();
-
+   //执行下一个拦截器
     return realChain.proceed(request, streamAllocation, httpCodec, connection);
   }
 ```
@@ -817,6 +831,12 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 1、弄一个RealConnection对象
 2、选择不同的连接方式
 3、CallServerInterceptor
+```
+
+##### 5.7.2 Okhttp 连接池ConnectionPool原理解析
+
+```
+
 ```
 
 
@@ -835,7 +855,7 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 
 最后便是返回Response。
 
-####5.9 总结
+####5.9 拦截器总结
 
 #####5.9.1 OkHttp拦截器--总结1
 
@@ -863,6 +883,28 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 
 ####6.3 httpCodec 源码分析
 
+### 7 经典试题
+
+#### 7.1 HttpClient&HttpUrlConnection 
+
+#### 7.2 OkHttp来实现WebSocket连接 
+
+#### 7.3 WebSocket&轮询相关 
+
+#### 7.4 Http缓存、Etag等标示作用 
+
+#### 7.5  断点续传原理&Okhttp如何实现 
+
+#### 7.6 多线程下载 
+
+#### 7.7 文件上传&Okhttp如何处理文件上传 
+
+#### 7.8 如何解析Json类型数据 
+
+#### 7.9 Https／对称加密&不对称加密 
 
 
-10、OkHttp链接复用原理分析
+
+
+
+
