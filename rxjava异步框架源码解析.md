@@ -112,11 +112,239 @@
 
 就是将事件序列中的对象或者整个序列进行加工处理
 
-###2.2 flatMap
+###2.2 map
+
+​        Map基本算是RxJava中一个最简单的操作符了，熟悉RxJava 1.x的知道，它的作用是对发射时间发送的每一个事件应用一个函数，是的每一个事件都按照指定的函数去变化，而在2.x中它的作用几乎一致。 
+
+​         对Observable发射的数据都应用(apply)一个函数，这个函数返回一个Observable，然后合并这些Observables，并且发送（emit）合并的结果。 flatMap和map操作符很相像，flatMap发送的是合并后的Observables，map操作符发送的是应用函数后返回的结果集 
+
+ ![](D:\AndroidFile\Photo\Rxjava\java01.png)
+
+
+
+```
+Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(@NonNull ObservableEmitter<Integer> e) throws Exception {
+                e.onNext(1);
+                e.onNext(2);
+                e.onNext(3);
+            }
+        }).map(new Function<Integer, String>() {
+            @Override
+            public String apply(@NonNull Integer integer) throws Exception {
+                return "This is result " + integer;
+            }
+        }).subscribe(new Consumer<String>() {
+            @Override
+            public void accept(@NonNull String s) throws Exception {
+                mRxOperatorsText.append("accept : " + s +"\n");
+                Log.e(TAG, "accept : " + s +"\n" );
+            }
+        });
+```
+
+![](D:\AndroidFile\Photo\Rxjava\Rxjava02.png)
+
+是的，map基本作用就是将一个Observable通过某种函数关系，转换为另一种Observable，上面例子中就是把我们的Integer数据变成了String类型。从Log日志显而易见。 
+
+
+
+###2.3 flatMap
+
+FlatMap 是一个很有趣的东西，我坚信你在实际开发中会经常用到。它可以把一个发射器Observable 通过某种方法转换为多个Observables，然后再把这些分散的Observables装进一个单一的发射器Observable。但有个需要注意的是，flatMap并不能保证事件的顺序，如果需要保证，需要用到我们下面要讲的ConcatMap。 
 
 1. 将传入的事件对象封装成一个Observable对象
 2. 这是不会直接发送这个Observable,而是将这个Observable激活让它自己开始发送事件
 3. 每一个创建出来的的Observable发送的事件，都被汇入同一个Observable.
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava07.png)
+
+```
+Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(@NonNull ObservableEmitter<Integer> e) throws Exception {
+                e.onNext(1);
+                e.onNext(2);
+                e.onNext(3);
+            }
+        }).flatMap(new Function<Integer, ObservableSource<String>>() {
+            @Override
+            public ObservableSource<String> apply(@NonNull Integer integer) throws Exception {
+                List<String> list = new ArrayList<>();
+                for (int i = 0; i < 3; i++) {
+                    list.add("I am value " + integer);
+                }
+                int delayTime = (int) (1 + Math.random() * 10);
+                return Observable.fromIterable(list).delay(delayTime, TimeUnit.MILLISECONDS);
+            }
+        }).subscribeOn(Schedulers.newThread())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Consumer<String>() {
+                    @Override
+                    public void accept(@NonNull String s) throws Exception {
+                        Log.e(TAG, "flatMap : accept : " + s + "\n");
+                        mRxOperatorsText.append("flatMap : accept : " + s + "\n");
+                    }
+                });
+```
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava09.png)
+
+一切都如我们预期中的有意思，为了区分concatMap（下一个会讲），我在代码中特意动了一点小手脚，我采用一个随机数，生成一个时间，然后通过delay（后面会讲）操作符，做一个小延时操作，而查看Log日志也确认验证了我们上面的说法，它是无序的。 
+
+
+
+
+
+### 2.4 Zip
+
+zip专用于合并事件，该合并不是连接（连接操作符后面会说），而是两两配对，也就意味着，最终配对出的Observable发射事件数目只和少的那个相同。 
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava03.png)
+
+
+
+```
+Observable.zip(getStringObservable(), getIntegerObservable(), new BiFunction<String, Integer, String>() {
+            @Override
+            public String apply(@NonNull String s, @NonNull Integer integer) throws Exception {
+                return s + integer;
+            }
+        }).subscribe(new Consumer<String>() {
+            @Override
+            public void accept(@NonNull String s) throws Exception {
+                mRxOperatorsText.append("zip : accept : " + s + "\n");
+                Log.e(TAG, "zip : accept : " + s + "\n");
+            }
+        });
+        
+private Observable<String> getStringObservable() {
+        return Observable.create(new ObservableOnSubscribe<String>() {
+            @Override
+            public void subscribe(@NonNull ObservableEmitter<String> e) throws Exception {
+                if (!e.isDisposed()) {
+                    e.onNext("A");
+                    mRxOperatorsText.append("String emit : A \n");
+                    Log.e(TAG, "String emit : A \n");
+                    e.onNext("B");
+                    mRxOperatorsText.append("String emit : B \n");
+                    Log.e(TAG, "String emit : B \n");
+                    e.onNext("C");
+                    mRxOperatorsText.append("String emit : C \n");
+                    Log.e(TAG, "String emit : C \n");
+                }
+            }
+        });
+    }
+
+    private Observable<Integer> getIntegerObservable() {
+        return Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(@NonNull ObservableEmitter<Integer> e) throws Exception {
+                if (!e.isDisposed()) {
+                    e.onNext(1);
+                    mRxOperatorsText.append("Integer emit : 1 \n");
+                    Log.e(TAG, "Integer emit : 1 \n");
+                    e.onNext(2);
+                    mRxOperatorsText.append("Integer emit : 2 \n");
+                    Log.e(TAG, "Integer emit : 2 \n");
+                    e.onNext(3);
+                    mRxOperatorsText.append("Integer emit : 3 \n");
+                    Log.e(TAG, "Integer emit : 3 \n");
+                    e.onNext(4);
+                    mRxOperatorsText.append("Integer emit : 4 \n");
+                    Log.e(TAG, "Integer emit : 4 \n");
+                    e.onNext(5);
+                    mRxOperatorsText.append("Integer emit : 5 \n");
+                    Log.e(TAG, "Integer emit : 5 \n");
+                }
+            }
+        });
+    }
+    
+    
+```
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava04.png)
+
+需要注意的是：
+
+1) zip 组合事件的过程就是分别从发射器A和发射器B各取出一个事件来组合，并且一个事件只能被使用一次，组合的顺序是严格按照事件发送的顺序来进行的，所以上面截图中，可以看到，1永远是和A 结合的，2永远是和B结合的。
+
+2) 最终接收器收到的事件数量是和发送器发送事件最少的那个发送器的发送事件数目相同，所以如截图中，5很孤单，没有人愿意和它交往，孤独终老的单身狗。
+
+### 2.5 Concat
+
+对于单一的把两个发射器连接成一个发射器，虽然 zip 不能完成，但我们还是可以自力更生，官方提供的 concat 让我们的问题得到了完美解决。
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava05.png)
+
+```
+Observable.concat(Observable.just(1,2,3), Observable.just(4,5,6))
+                .subscribe(new Consumer<Integer>() {
+                    @Override
+                    public void accept(@NonNull Integer integer) throws Exception {
+                        mRxOperatorsText.append("concat : "+ integer + "\n");
+                        Log.e(TAG, "concat : "+ integer + "\n" );
+                    }
+                });
+```
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava06.png)
+
+如图，可以看到。发射器B把自己的三个孩子送给了发射器A，让他们组合成了一个新的发射器，非常懂事的孩子，有条不紊的排序接收。 
+
+###2.6 concatMap 
+
+上面其实就说了，concatMap 与 FlatMap 的唯一区别就是 concatMap 保证了顺序，所以，我们就直接把 flatMap 替换为 concatMap 验证吧。 
+
+```
+Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(@NonNull ObservableEmitter<Integer> e) throws Exception {
+                e.onNext(1);
+                e.onNext(2);
+                e.onNext(3);
+            }
+        }).concatMap(new Function<Integer, ObservableSource<String>>() {
+            @Override
+            public ObservableSource<String> apply(@NonNull Integer integer) throws Exception {
+                List<String> list = new ArrayList<>();
+                for (int i = 0; i < 3; i++) {
+                    list.add("I am value " + integer);
+                }
+                int delayTime = (int) (1 + Math.random() * 10);
+                return Observable.fromIterable(list).delay(delayTime, TimeUnit.MILLISECONDS);
+            }
+        }).subscribeOn(Schedulers.newThread())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Consumer<String>() {
+                    @Override
+                    public void accept(@NonNull String s) throws Exception {
+                        Log.e(TAG, "flatMap : accept : " + s + "\n");
+                        mRxOperatorsText.append("flatMap : accept : " + s + "\n");
+                    }
+                });
+```
+
+![](D:\AndroidFile\Photo\Rxjava\rxjava10.png)
+
+结果的确和我们预想的一样。 
+
+### 2.7 lift
+
+
+
+### 2.8 interval、takeWhile
+
+
+
+
+
+
+
+
 
 ##三、 Rxjava 线程Schedulers
 
