@@ -48,7 +48,7 @@ Glide中Resource类有此方法，表示该资源不被引用，可以放入池�
 
 #### 1.1.11 DecodeJob 
 
-图片处理 
+图片处理 ;它的主要作用就是用来开启线程的，为后面的异步加载图片做准备 
 
 ### 1.2 类分布图
 
@@ -373,6 +373,8 @@ public class RequestManager implements LifecycleListener {
 }
 ```
 
+#####2.3.2.1 loadGeneric（）
+
 RequestManager类的代码是非常多的，但是经过我这样简化之后，看上去就比较清爽了。在我们只探究加载图片URL字符串这一个load()方法的情况下，那么比较重要的方法就只剩下上述代码中的这三个方法。
 
 那么我们先来看load()方法，这个方法中的逻辑是非常简单的，只有一行代码，就是先调用了fromString()方法，再调用load()方法，然后把传入的图片URL地址传进去。而fromString()方法也极为简单，就是调用了loadGeneric()方法，并且指定参数为String.class，因为load()方法传入的是一个字符串参数。那么看上去，好像主要的工作都是在loadGeneric()方法中进行的了。
@@ -651,6 +653,18 @@ public <Y extends Target<TranscodeType>> Y into(Y target) {
 }
 ```
 
+这个方法主要做了三件事情：
+
+1、创建一个我们需要的加载图片的Reuqst,
+
+2、创建好request之前，它需要对我们旧的Target绑定的Request进行删除，然后再另一个Target绑定到Request
+
+3、发送我们的request，交给我们的requestTracker，这个requestTracker有管理跟踪进行相应的request处理。
+
+
+
+
+
 ###2.7 Request对象的创建 
 
 ####2.7.1 buildRequest()
@@ -862,8 +876,10 @@ public void begin() {
     }
     status = Status.WAITING_FOR_SIZE;
     if (Util.isValidDimensions(overrideWidth, overrideHeight)) {
+    //使用了override()API,为图片指定了一个固定宽和高
         onSizeReady(overrideWidth, overrideHeight);
     } else {
+    //没有指定一个固定的宽和高，就调用该方法
         target.getSize(this);
     }
     if (!isComplete() && !isFailed() && canNotifyStatusChanged()) {
@@ -934,114 +950,525 @@ public abstract class ImageViewTarget<Z> extends ViewTarget<ImageView, Z> implem
 
 ​        是在begin()方法的第10行和第12行。这里要分两种情况，一种是你使用了override() API为图片指定了一个固定的宽高，一种是没有指定。如果指定了的话，就会执行第10行代码，调用onSizeReady()方法。如果没指定的话，就会执行第12行代码，调用target.getSize()方法。这个target.getSize()方法的内部会根据ImageView的layout_width和layout_height值做一系列的计算，来算出图片应该的宽高。具体的计算细节我就不带着大家分析了，总之在计算完之后，它也会调用onSizeReady()方法。也就是说，不管是哪种情况，最终都会调用到onSizeReady()方法，在这里进行下一步操作。那么我们跟到这个方法里面来：
 
-
-
-
-
-
-
-我们再来看一下into(glide.buildImageViewTarget(view, transcodeClass))中的buildImageViewTarget
+###2.9 onSizeReady ()
 
 ```
-//通过imageViewTargetFactory这个工厂来构建我们的target
-<R> Target<R> buildImageViewTarget(ImageView imageView, Class<R> transcodedClass) {
-        return imageViewTargetFactory.buildTarget(imageView, transcodedClass);
+@Override
+public void onSizeReady(int width, int height) {
+    if (Log.isLoggable(TAG, Log.VERBOSE)) {
+        logV("Got onSizeReady in " + LogTime.getElapsedMillis(startTime));
     }
- 
- //我们看一下buildeTarget是怎么做的
-public class ImageViewTargetFactory {
+    if (status != Status.WAITING_FOR_SIZE) {
+        return;
+    }
+    status = Status.RUNNING;
+    width = Math.round(sizeMultiplier * width);
+    height = Math.round(sizeMultiplier * height);
+    ModelLoader<A, T> modelLoader = loadProvider.getModelLoader();
+    final DataFetcher<T> dataFetcher = modelLoader.getResourceFetcher(model, width, height);
+    if (dataFetcher == null) {
+        onException(new Exception("Failed to load model: \'" + model + "\'"));
+        return;
+    }
+    ResourceTranscoder<Z, R> transcoder = loadProvider.getTranscoder();
+    if (Log.isLoggable(TAG, Log.VERBOSE)) {
+        logV("finished setup for calling load in " + LogTime.getElapsedMillis(startTime));
+    }
+    loadedFromMemoryCache = true;
+    loadStatus = engine.load(signature, width, height, dataFetcher, loadProvider, transformation, transcoder,
+            priority, isMemoryCacheable, diskCacheStrategy, this);
+    loadedFromMemoryCache = resource != null;
+    if (Log.isLoggable(TAG, Log.VERBOSE)) {
+        logV("finished onSizeReady in " + LogTime.getElapsedMillis(startTime));
+    }
+}
+```
 
-    @SuppressWarnings("unchecked")
-    public <Z> Target<Z> buildTarget(ImageView view, Class<Z> clazz) {
-        if (GlideDrawable.class.isAssignableFrom(clazz)) {
-            return (Target<Z>) new GlideDrawableImageViewTarget(view);
-        } else if (Bitmap.class.equals(clazz)) {
-        //如果调用的是asBitmap()这个方法就返回BitmapImageViewTarget,如果没有调用asBitmp()这个方法，
-        //就返回GlideDrawableImageVeiwTarget的对象
-            return (Target<Z>) new BitmapImageViewTarget(view);
-        } else if (Drawable.class.isAssignableFrom(clazz)) {
-            return (Target<Z>) new DrawableImageViewTarget(view);
+
+
+
+
+## 三、Glide 缓存分析
+
+###3.1 Glide缓存简介
+
+Glide的缓存设计可以说是非常先进的，考虑的场景也很周全。在缓存这一功能上，Glide又将它分成了两个模块，一个是内存缓存，一个是硬盘缓存。 
+
+####3.1.1内存缓存用作
+
+内存缓存的主要作用是防止应用重复将图片数据读取到内存当中， 
+
+####3.1.2 硬盘缓存作用
+
+硬盘缓存的主要作用是防止应用重复从网络或其他地方重复下载和读取数据。
+
+总结：内存缓存和硬盘缓存的相互结合才构成了Glide极佳的图片缓存效果， 
+
+### 3.2 缓存key
+
+既然是缓存功能，就必然会有用于进行缓存的Key。那么Glide的缓存Key是怎么生成的呢？我不得不说，Glide的缓存Key生成规则非常繁琐，决定缓存Key的参数竟然有10个之多。不过繁琐归繁琐，至少逻辑还是比较简单的，我们先来看一下Glide缓存Key的生成逻辑。
+
+生成缓存Key的代码在Engine类的load()方法当中，这部分代码我们在上一篇文章当中已经分析过了，只不过当时忽略了缓存相关的内容，那么我们现在重新来看一下：
+
+```
+public class Engine implements EngineJobListener,
+        MemoryCache.ResourceRemovedListener,
+        EngineResource.ResourceListener {
+
+    public <T, Z, R> LoadStatus load(Key signature, int width, int height, DataFetcher<T> fetcher,
+            DataLoadProvider<T, Z> loadProvider, Transformation<Z> transformation, ResourceTranscoder<Z, R> transcoder,
+            Priority priority, boolean isMemoryCacheable, DiskCacheStrategy diskCacheStrategy, ResourceCallback cb) {
+        Util.assertMainThread();
+        long startTime = LogTime.getLogTime();
+     //图片的唯一标识
+        final String id = fetcher.getId();
+        //Glide中的缓存Key
+        EngineKey key = keyFactory.buildKey(id, signature, width, height, loadProvider.getCacheDecoder(),
+                loadProvider.getSourceDecoder(), transformation, loadProvider.getEncoder(),
+                transcoder, loadProvider.getSourceEncoder());
+
+        ...
+    }
+
+    ...
+}
+```
+
+可以看到，这里在第11行调用了fetcher.getId()方法获得了一个id字符串，这个字符串也就是我们要加载的图片的唯一标识，比如说如果是一张网络上的图片的话，那么这个id就是这张图片的url地址。
+
+接下来在第12行，将这个id连同着signature、width、height等等10个参数一起传入到EngineKeyFactory的buildKey()方法当中，从而构建出了一个EngineKey对象，这个EngineKey也就是Glide中的缓存Key了。
+
+可见，决定缓存Key的条件非常多，即使你用override()方法改变了一下图片的width或者height，也会生成一个完全不同的缓存Key。
+
+EngineKey类的源码大家有兴趣可以自己去看一下，其实主要就是重写了equals()和hashCode()方法，保证只有传入EngineKey的所有参数都相同的情况下才认为是同一个EngineKey对象，我就不在这里将源码贴出来了。
+
+###3.3 内存缓存
+
+有了缓存Key，接下来就可以开始进行缓存了，那么我们先从内存缓存看起。
+
+首先你要知道，默认情况下，Glide自动就是开启内存缓存的。也就是说，当我们使用Glide加载了一张图片之后，这张图片就会被缓存到内存当中，只要在它还没从内存中被清除之前，下次使用Glide再加载这张图片都会直接从内存当中读取，而不用重新从网络或硬盘上读取了，这样无疑就可以大幅度提升图片的加载效率。比方说你在一个RecyclerView当中反复上下滑动，RecyclerView中只要是Glide加载过的图片都可以直接从内存当中迅速读取并展示出来，从而大大提升了用户体验。
+
+而Glide最为人性化的是，你甚至不需要编写任何额外的代码就能自动享受到这个极为便利的内存缓存功能，因为Glide默认就已经将它开启了。
+
+那么既然已经默认开启了这个功能，还有什么可讲的用法呢？只有一点，如果你有什么特殊的原因需要禁用内存缓存功能，Glide对此提供了接口：
+
+```
+Glide.with(this)
+     .load(url)
+     .skipMemoryCache(true) //true，就表示禁用掉Glide的内存缓存功能
+     .into(imageView);
+```
+
+可以看到，只需要调用skipMemoryCache()方法并传入true，就表示禁用掉Glide的内存缓存功能。
+
+没错，关于Glide内存缓存的用法就只有这么多，可以说是相当简单。但是我们不可能只停留在这么简单的层面上，接下来就让我们就通过阅读源码来分析一下Glide的内存缓存功能是如何实现的。
+
+其实说到内存缓存的实现，非常容易就让人想到LruCache算法（Least Recently Used），也叫近期最少使用算法。它的主要算法原理就是把最近使用的对象用强引用存储在LinkedHashMap中，并且把最近最少使用的对象在缓存值达到预设定值之前从内存中移除。LruCache的用法也比较简单，我在 [Android高效加载大图、多图解决方案，有效避免程序OOM](http://blog.csdn.net/guolin_blog/article/details/9316683) 这篇文章当中有提到过它的用法，感兴趣的朋友可以去参考一下。
+
+那么不必多说，Glide内存缓存的实现自然也是使用的LruCache算法。不过除了LruCache算法之外，Glide还结合了一种弱引用的机制，共同完成了内存缓存功能，下面就让我们来通过源码分析一下。
+
+####3.3.1 Glide.buildStreamModelLoader()
+
+首先回忆一下，在上一篇文章的第二步load()方法中，我们当时分析到了在loadGeneric()方法中会调用Glide.buildStreamModelLoader()方法来获取一个ModelLoader对象。当时没有再跟进到这个方法的里面再去分析，那么我们现在来看下它的源码：
+
+```
+public class Glide {
+
+    public static <T, Y> ModelLoader<T, Y> buildModelLoader(Class<T> modelClass, Class<Y> resourceClass,
+            Context context) {
+         if (modelClass == null) {
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "Unable to load null model, setting placeholder only");
+            }
+            return null;
+        }
+        return Glide.get(context).getLoaderFactory().buildModelLoader(modelClass, resourceClass);
+    }
+
+    public static Glide get(Context context) {
+        if (glide == null) {
+            synchronized (Glide.class) {
+                if (glide == null) {
+                    Context applicationContext = context.getApplicationContext();
+                    List<GlideModule> modules = new ManifestParser(applicationContext).parse();
+                    GlideBuilder builder = new GlideBuilder(applicationContext);
+                    for (GlideModule module : modules) {
+                        module.applyOptions(applicationContext, builder);
+                    }
+                    //创建Glide对象
+                    glide = builder.createGlide();
+                    for (GlideModule module : modules) {
+                        module.registerComponents(applicationContext, glide);
+                    }
+                }
+            }
+        }
+        return glide;
+    }
+
+    ...
+}
+```
+
+这里我们还是只看关键，在第11行去构建ModelLoader对象的时候，先调用了一个Glide.get()方法，而这个方法就是关键。我们可以看到，get()方法中实现的是一个单例功能，而创建Glide对象则是在第24行调用GlideBuilder的createGlide()方法来创建的，那么我们跟到这个方法当中： 
+
+####3.3.2 GlideBuilder. createGlide() 
+
+```
+public class GlideBuilder {
+    ...
+
+    Glide createGlide() {
+        if (sourceService == null) {
+            final int cores = Math.max(1, Runtime.getRuntime().availableProcessors());
+            sourceService = new FifoPriorityThreadPoolExecutor(cores);
+        }
+        if (diskCacheService == null) {
+            diskCacheService = new FifoPriorityThreadPoolExecutor(1);
+        }
+        MemorySizeCalculator calculator = new MemorySizeCalculator(context);
+        if (bitmapPool == null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+                int size = calculator.getBitmapPoolSize();
+                bitmapPool = new LruBitmapPool(size);
+            } else {
+                bitmapPool = new BitmapPoolAdapter();
+            }
+        }
+        if (memoryCache == null) {
+        //Glide实现内存缓存所使用的LruCache对象
+            memoryCache = new LruResourceCache(calculator.getMemoryCacheSize());
+        }
+        if (diskCacheFactory == null) {
+            diskCacheFactory = new InternalCacheDiskCacheFactory(context);
+        }
+        if (engine == null) {
+            engine = new Engine(memoryCache, diskCacheFactory, diskCacheService, sourceService);
+        }
+        if (decodeFormat == null) {
+            decodeFormat = DecodeFormat.DEFAULT;
+        }
+        //构建Glide对象
+        return new Glide(engine, memoryCache, bitmapPool, context, decodeFormat);
+    }
+}
+```
+
+这里也就是构建Glide对象的地方了。那么观察第22行，你会发现这里new出了一个LruResourceCache，并把它赋值到了memoryCache这个对象上面。你没有猜错，这个就是Glide实现内存缓存所使用的LruCache对象了。不过我这里并不打算展开来讲LruCache算法的具体实现，如果你感兴趣的话可以自己研究一下它的源码。
+
+现在创建好了LruResourceCache对象只能说是把准备工作做好了，接下来我们就一步步研究Glide中的内存缓存到底是如何实现的。
+
+刚才在Engine的load()方法中我们已经看到了生成缓存Key的代码，而内存缓存的代码其实也是在这里实现的，那么我们重新来看一下Engine类load()方法的完整源码：
+
+###3.4 Engine类load()方法
+
+```
+public class Engine implements EngineJobListener,
+        MemoryCache.ResourceRemovedListener,
+        EngineResource.ResourceListener {
+    ...    
+
+    public <T, Z, R> LoadStatus load(Key signature, int width, int height, DataFetcher<T> fetcher,
+            DataLoadProvider<T, Z> loadProvider, Transformation<Z> transformation, ResourceTranscoder<Z, R> transcoder,
+            Priority priority, boolean isMemoryCacheable, DiskCacheStrategy diskCacheStrategy, ResourceCallback cb) {
+        Util.assertMainThread();
+        long startTime = LogTime.getLogTime();
+
+        final String id = fetcher.getId();
+        EngineKey key = keyFactory.buildKey(id, signature, width, height, loadProvider.getCacheDecoder(),
+                loadProvider.getSourceDecoder(), transformation, loadProvider.getEncoder(),
+                transcoder, loadProvider.getSourceEncoder());
+       //获取缓存图片
+        EngineResource<?> cached = loadFromCache(key, isMemoryCacheable);
+        if (cached != null) {
+            cb.onResourceReady(cached);
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                logWithTimeAndKey("Loaded resource from cache", startTime, key);
+            }
+            return null;
+        }
+      //如果没有获取到缓存的图片,调用loadFromActiveResources()方法来获取缓存图片，获取到的话也直接进行回调
+        EngineResource<?> active = loadFromActiveResources(key, isMemoryCacheable);
+        if (active != null) {
+        //获取到缓存图片的话也直接进行回调
+            cb.onResourceReady(active);
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                logWithTimeAndKey("Loaded resource from active resources", startTime, key);
+            }
+            return null;
+        }
+//只有在两个方法都没有获取到缓存的情况下，才会继续向下执行，从而开启线程来加载图片。要不然，上面就return
+        EngineJob current = jobs.get(key);
+        if (current != null) {
+            current.addCallback(cb);
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                logWithTimeAndKey("Added to existing load", startTime, key);
+            }
+            return new LoadStatus(cb, current);
+        }
+
+        EngineJob engineJob = engineJobFactory.build(key, isMemoryCacheable);
+        DecodeJob<T, Z, R> decodeJob = new DecodeJob<T, Z, R>(key, width, height, fetcher, loadProvider, transformation,
+                transcoder, diskCacheProvider, diskCacheStrategy, priority);
+        EngineRunnable runnable = new EngineRunnable(engineJob, decodeJob, priority);
+        jobs.put(key, engineJob);
+        engineJob.addCallback(cb);
+        engineJob.start(runnable);
+
+        if (Log.isLoggable(TAG, Log.VERBOSE)) {
+            logWithTimeAndKey("Started new load", startTime, key);
+        }
+        return new LoadStatus(cb, engineJob);
+    }
+
+    ...
+}
+```
+
+可以看到，这里在第17行调用了loadFromCache()方法来获取缓存图片，如果获取到就直接调用cb.onResourceReady()方法进行回调。如果没有获取到，则会在第26行调用loadFromActiveResources()方法来获取缓存图片，获取到的话也直接进行回调。只有在两个方法都没有获取到缓存的情况下，才会继续向下执行，从而开启线程来加载图片。
+
+####3.4.1 获取缓存图片的方法
+
+（1）loadFromCache()
+
+（2）loadFromActiveResources()。
+
+也就是说，Glide的图片加载过程中会调用两个方法来获取内存缓存，loadFromCache()和loadFromActiveResources()。这两个方法中一个使用的就是LruCache算法，另一个使用的就是弱引用。
+
+我们来看一下它们的源码：
+
+#### 3.4.2 Engine .loadFromCache ()
+
+####3.4.3 Engine .loadFromActiveResources()
+
+```
+public class Engine implements EngineJobListener,
+        MemoryCache.ResourceRemovedListener,
+        EngineResource.ResourceListener {
+
+    private final MemoryCache cache;
+    private final Map<Key, WeakReference<EngineResource<?>>> activeResources;
+    ...
+
+    private EngineResource<?> loadFromCache(Key key, boolean isMemoryCacheable) {
+      //判断了isMemoryCacheable是不是false,skipMemoryCache(true)表示 内存缓存已被禁用
+      if (!isMemoryCacheable) {
+            return null;
+        }
+        //获取缓存
+        EngineResource<?> cached = getEngineResourceFromCache(key);
+        if (cached != null) {
+            cached.acquire();
+            //将这个缓存图片存储到activeResources当中
+            activeResources.put(key, new ResourceWeakReference(key, cached, getReferenceQueue()));
+        }
+        return cached;
+    }
+
+    private EngineResource<?> getEngineResourceFromCache(Key key) {
+    //从LruResourceCache中获取到缓存图片之后会将它从缓存中移除
+        Resource<?> cached = cache.remove(key);
+        final EngineResource result;
+        if (cached == null) {
+            result = null;
+        } else if (cached instanceof EngineResource) {
+            result = (EngineResource) cached;
         } else {
-            throw new IllegalArgumentException("Unhandled class: " + clazz
-                    + ", try .as*(Class).transcode(ResourceTranscoder)");
+            result = new EngineResource(cached, true /*isCacheable*/);
+        }
+        return result;
+    }
+
+    private EngineResource<?> loadFromActiveResources(Key key, boolean isMemoryCacheable) {
+        if (!isMemoryCacheable) {
+            return null;
+        }
+        EngineResource<?> active = null;
+        //activeResources就是一个弱引用的HashMap，用来缓存正在使用中的图片，我们可以看到，loadFromActiveResources()方法就是从activeResources这个HashMap当中取值的。使用activeResources来缓存正在使用中的图片，可以保护这些图片不会被LruCache算法回收掉。
+        WeakReference<EngineResource<?>> activeRef = activeResources.get(key);
+        if (activeRef != null) {
+            active = activeRef.get();
+            if (active != null) {
+                active.acquire();
+            } else {
+                activeResources.remove(key);
+            }
+        }
+        return active;
+    }
+
+    ...
+}
+```
+
+在loadFromCache()方法的一开始，首先就判断了isMemoryCacheable是不是false，如果是false的话就直接返回null。这是什么意思呢？其实很简单，我们刚刚不是学了一个skipMemoryCache()方法吗？如果在这个方法中传入true，那么这里的isMemoryCacheable就会是false，表示内存缓存已被禁用。
+
+我们继续住下看，接着调用了getEngineResourceFromCache()方法来获取缓存。在这个方法中，会使用缓存Key来从cache当中取值，而这里的cache对象就是在构建Glide对象时创建的LruResourceCache，那么说明这里其实使用的就是LruCache算法了。
+
+但是呢，观察第22行，当我们从LruResourceCache中获取到缓存图片之后会将它从缓存中移除，然后在第16行将这个缓存图片存储到activeResources当中。activeResources就是一个弱引用的HashMap，用来缓存正在使用中的图片，我们可以看到，loadFromActiveResources()方法就是从activeResources这个HashMap当中取值的。使用activeResources来缓存正在使用中的图片，可以保护这些图片不会被LruCache算法回收掉。
+
+####3.4.4总结
+
+好的，从内存缓存中读取数据的逻辑大概就是这些了。概括一下来说，就是**如果能从内存缓存当中读取到要加载的图片，那么就直接进行回调，如果读取不到的话，才会开启线程执行后面的图片加载逻辑**。
+
+###3.5 内存缓存是在哪里写入的？
+
+现在我们已经搞明白了内存缓存读取的原理，接下来的问题就是内存缓存是在哪里写入的呢？这里我们又要回顾一下上一篇文章中的内容了。还记不记得我们之前分析过，当图片加载完成之后，会在EngineJob当中通过Handler发送一条消息将执行逻辑切回到主线程当中，从而执行handleResultOnMainThread()方法。那么我们现在重新来看一下这个方法，代码如下所示：
+
+####3.5.1 EngineJob.handleResultOnMainThread() 
+
+```
+class EngineJob implements EngineRunnable.EngineRunnableManager {
+
+    private final EngineResourceFactory engineResourceFactory;
+    ...
+
+    private void handleResultOnMainThread() {
+        if (isCancelled) {
+            resource.recycle();
+            return;
+        } else if (cbs.isEmpty()) {
+            throw new IllegalStateException("Received a resource without any callbacks to notify");
+        }
+        //构建出了一个包含图片资源的EngineResource对象
+        engineResource = engineResourceFactory.build(resource, isCacheable);
+        hasResource = true;
+        engineResource.acquire();
+        //将这个对象回调到Engine的onEngineJobComplete()方法当中
+        listener.onEngineJobComplete(key, engineResource);
+        for (ResourceCallback cb : cbs) {
+            if (!isInIgnoredCallbacks(cb)) {
+                engineResource.acquire();
+                cb.onResourceReady(engineResource);
+            }
+        }
+        engineResource.release();
+    }
+
+    static class EngineResourceFactory {
+        public <R> EngineResource<R> build(Resource<R> resource, boolean isMemoryCacheable) {
+            return new EngineResource<R>(resource, isMemoryCacheable);
+        }
+    }
+    ...
+}
+```
+
+####3.5.2 Engine的onEngineJobComplete() 
+
+```
+public class Engine implements EngineJobListener,
+        MemoryCache.ResourceRemovedListener,
+        EngineResource.ResourceListener {
+    ...    
+
+    @Override
+    public void onEngineJobComplete(Key key, EngineResource<?> resource) {
+        Util.assertMainThread();
+        // A null resource indicates that the load failed, usually due to an exception.
+        if (resource != null) {
+            resource.setResourceListener(key, this);
+            if (resource.isCacheable()) {
+            //回调过来的EngineResource被put到了activeResources当中，也就是在这里写入的缓存。
+                activeResources.put(key, new ResourceWeakReference(key, resource, getReferenceQueue()));
+            }
+        }
+        jobs.remove(key);
+    }
+
+    ...
+}
+```
+
+现在就非常明显了，可以看到，在第13行，回调过来的EngineResource被put到了activeResources当中，也就是在这里写入的缓存。
+
+####3.5.3 EngineResource.acquire()
+
+那么这只是弱引用缓存，还有另外一种LruCache缓存是在哪里写入的呢？这就要介绍一下EngineResource中的一个引用机制了。观察刚才的handleResultOnMainThread()方法，在第15行和第19行有调用EngineResource的acquire()方法，在第23行有调用它的release()方法。其实，EngineResource是用一个acquired变量用来记录图片被引用的次数，调用acquire()方法会让变量加1，调用release()方法会让变量减1，代码如下所示：
+
+```
+class EngineResource<Z> implements Resource<Z> {
+
+    private int acquired;
+    ...
+
+    void acquire() {
+        if (isRecycled) {
+            throw new IllegalStateException("Cannot acquire a recycled resource");
+        }
+        if (!Looper.getMainLooper().equals(Looper.myLooper())) {
+            throw new IllegalThreadStateException("Must call acquire on the main thread");
+        }
+        ++acquired;
+    }
+
+    void release() {
+        if (acquired <= 0) {
+            throw new IllegalStateException("Cannot release a recycled or not yet acquired resource");
+        }
+        if (!Looper.getMainLooper().equals(Looper.myLooper())) {
+            throw new IllegalThreadStateException("Must call release on the main thread");
+        }
+        if (--acquired == 0) {
+        //如果acquired变量等于0了，说明图片已经不再被使用了,释放资源
+            listener.onResourceReleased(key, this);
         }
     }
 }
-buildTRarget这个方法很简单，就是传入两个参数，主要是根据Class<Z>class,来判断我们到底是加载哪一张图片
-
 ```
 
+也就是说，当acquired变量大于0的时候，说明图片正在使用中，也就应该放到activeResources弱引用缓存当中。而经过release()之后，如果acquired变量等于0了，说明图片已经不再被使用了，那么此时会在第24行调用listener的onResourceReleased()方法来释放资源，这个listener就是Engine对象，我们来看下它的onResourceReleased()方法： 
 
-
-到这里，Targer差不多就常见完成了
-
-
-
-####2.4.2 request建立和begin方法  
+####3.5.4 Engine.onResourceReleased()
 
 ```
-从DrawableRequestBuilder 中的into()
-@Override
-    public Target<GlideDrawable> into(ImageView view) {
-        return super.into(view);
-    }
-    方法中，跳转过来的
-    GenericRequestBuilder.class
-public <Y extends Target<TranscodeType>> Y into(Y target) {
-//对我们是不是主线程做一个判断，图片显示是在UI线程中执行的
+public class Engine implements EngineJobListener,
+        MemoryCache.ResourceRemovedListener,
+        EngineResource.ResourceListener {
+
+    private final MemoryCache cache;
+    private final Map<Key, WeakReference<EngineResource<?>>> activeResources;
+    ...    
+
+    @Override
+    public void onResourceReleased(Key cacheKey, EngineResource resource) {
         Util.assertMainThread();
-        if (target == null) {
-            throw new IllegalArgumentException("You must pass in a non null Target");
+        //首先会将缓存图片从activeResources中移除
+        activeResources.remove(cacheKey);
+        if (resource.isCacheable()) {
+        //然后再将它put到LruResourceCache当中。这样也就实现了正在使用中的图片使用弱引用来进行缓存，不在使用中的图片使用LruCache来进行缓存的功能。
+            cache.put(cacheKey, resource);
+        } else {
+            resourceRecycler.recycle(resource);
         }
-        if (!isModelSet) {
-            throw new IllegalArgumentException("You must first set a model (try #load())");
-        }
-//获取当前target对象所绑定的Request对象，就是前一个(旧的)Request,只要将旧的Request删除了，才能绑定新
-//的Request, 才能进行新的操作.
-        Request previous = target.getRequest();
-
-        if (previous != null) {
-            previous.clear();
-            //将这个Request这个动作暂停
-            requestTracker.removeRequest(previous);
-            previous.recycle();
-        }
-        //创建新的Request
-        Request request = buildRequest(target);
-        //进行相应的绑定
-        target.setRequest(request);
-        lifecycle.addListener(target);
-        requestTracker.runRequest(request);
-
-        return target;
     }
+
+    ...
+}
 ```
 
-这个方法主要做了三件事情：
+ 可以看到，这里首先会将缓存图片从activeResources中移除，然后再将它put到LruResourceCache当中。这样也就实现了正在使用中的图片使用弱引用来进行缓存，不在使用中的图片使用LruCache来进行缓存的功能。
 
-1、创建一个我们需要的加载图片的Reuqst,
-
-2、创建好request之前，它需要对我们旧的Target绑定的Request进行删除，然后再另一个Target绑定到Request
-
-3、发送我们的request，交给我们的requestTracker，这个requestTracker有管理跟踪进行相应的request处理。
+这就是Glide内存缓存的实现原理。
 
 
 
+###3.6 硬盘缓存
+
+接下来我们开始学习硬盘缓存方面的内容。
+
+不知道你还记不记得，在本系列的第一篇文章中我们就使用过硬盘缓存的功能了。当时为了禁止Glide对图片进行硬盘缓存而使用了如下代码：
+
+```
+Glide.with(this)
+     .load(url)
+     .diskCacheStrategy(DiskCacheStrategy.NONE)
+     .into(imageView);
+```
 
 
 
-
-
-
-#### 2.4.3 Loadprovider 
-
-#### 2.4.4 硬盘缓存／内存缓存 
-
-####2.4.5 内存缓存的读取 
-
-####2.4.6 内存缓存的写入 
-
-## 三、API扩展
+## 四、API扩展
 
 ### 3.1 占位图placeholder
 
@@ -1231,7 +1658,7 @@ Glide.with(this)
 
 
 
-##四、试题
+##五、试题
 
 ### 3.1 bitmap&oom&优化bitmap、
 
