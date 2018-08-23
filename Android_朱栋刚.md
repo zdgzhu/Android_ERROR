@@ -27,7 +27,7 @@
 
 - 简介：记录患者信息，拍摄照片，生成pdf，打印报告（软硬件配合使用）
 
-- 主要技术：RxJava, Glide,  Retrofit，Litepal，leakcanary
+- 主要技术：Handler, Glide,  Okhttp，Litepal，leakcanary
 
 - 承担任务：
 
@@ -52,7 +52,7 @@
 公司：上海法路源医疗器械有限公司
 
 - 简介：导入导出Excel表中的数据，展示用户信息，拍照
-- 主要技术：Retrofit, Glide，Litepal，RxJava，leakcanary
+- 主要技术：Okhttp, Glide，Litepal，Handler，leakcanary
 - 承担任务：
  - 框架代码维护拓展
 - 陈旧代码重构，新业务开发
@@ -67,7 +67,7 @@
 公司：天津网宇网络科技有限公司
 
 - 简介：为创业街区提供数据支持
-- 主要技术：RxJava，
+- 主要技术：Handler，
 - 承担任务：
  - fragment切换
 
@@ -77,7 +77,7 @@
 **自学 APP**
 
 - 简介：慕课课程APP
-- 主要技术：组件化, MVP, Dagger2, RxJava，Retrofit, Picasso
+- 主要技术：组件化, MVP, Handler，Okhttp, Glide
 - 独立完成：
  - 封装基础框架
  - 自定义视频播放器
