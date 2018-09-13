@@ -1,8 +1,6 @@
+##Android常见操作和错误收集
 
-
-#               Android常见操作和错误收集
-
-### 一、背景 
+###一、背景
 
 在Android开发过程，会遇到各种各样的错误，再次记录下来。
 
@@ -179,4 +177,25 @@ gradlew :app:dependencies --configuration compile 
 
 ​    -1.2  [Gradle解决依赖冲突](https://www.jianshu.com/p/8d02da77c83d)
 
-####2、
+####2、Android Studio 过滤特定的log
+
+过滤掉特定的log需要使用正则表达式，勾选**Regex**选项，在**Log Tag**中输入 
+
+```
+^(?!.*(AAA)).*$
+```
+
+其中**AAA**是要过滤的tag,适用去掉无用重复的log，如:使用SurfaceView时，经常会弹出过多绘制的log，导致刷屏。 如果需要过滤多个呢，假设还需要过滤"BBB",将 
+
+```
+^(?!.*(AAA)).*$
+```
+
+修改为 
+
+```
+^(?!.*(AAA|BBB)).*$ 
+```
+
+
+
