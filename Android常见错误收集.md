@@ -194,8 +194,8 @@ gradlew :app:dependencies --configuration compile 
 修改为 
 
 ```
-^(?!.*(AAA|BBB)).*$ 
+^(?!.*(AAA|BBB)).*$     或者这个例子 ^(?!.*(AudioFlinger|SurfaceView)).*$
 ```
 
-
+[Android Studio实现保留或过滤特定Log](https://www.jianshu.com/p/11e56991ff28)
 

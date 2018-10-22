@@ -1,6 +1,8 @@
+
+
 # OkHttp解析
 
-### 1、OkHttp框架的整体设计思路解析
+### 一、OkHttp框架的整体设计思路解析
 
 #### 1.1整体架构
 
@@ -22,7 +24,7 @@
 
 ​        **OKHttpClient**，我们在这里对它进行各种设置，实现各种不同形式的网络请求，每个OKHttpClient内部都维护了属于自己的任务队列，连接池，Cache，拦截器等。所以在使用OkHttp作为网络框架时应该全局共享一个OkHttpClient实例。 
 
-### 2、OkHttp使用方法简介
+### 二、OkHttp使用方法简介
 
 #### 2.1 OkHttp同步方法总结
 
@@ -99,7 +101,7 @@ onResponse 和onFailure 都是在工作线程中执行的，也就是子线程�
 
 
 
-### 3、OkHttp异步/同步流程和源码分析
+### 三、OkHttp异步/同步流程和源码分析
 
 ####3.1 源码分析
 
@@ -308,7 +310,7 @@ final class AsyncCall extends NamedRunnable {
 3：client.dispatcher().enqueue()
 ```
 
-###4、Okhttp调度器Dispatcher源码分析
+###四、Okhttp调度器Dispatcher源码分析
 
 ####4.1 okhttp如何实现同步异步的请求？
 
@@ -527,7 +529,7 @@ public final class Dispatcher {
 
 ```
 
-###5、OkHttp拦截器Interceptor源码分析
+###五、OkHttp拦截器Interceptor源码分析
 
 ####5.1 拦截器定义
 
@@ -875,7 +877,7 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 
 
 
-### 6 Okhttp网络底层详解
+### 六、Okhttp网络底层详解
 
 ####6.1 Address源码分析 
 
@@ -883,25 +885,303 @@ ConnectInterceptor通过StreamAllocation创建了HttpStream对象和RealConnecti
 
 ####6.3 httpCodec 源码分析
 
-### 7 经典试题
+### 七、OkHttp的get()&post()
 
-#### 7.1 HttpClient&HttpUrlConnection 
+#### 7.1 get()方法的使用
 
-#### 7.2 OkHttp来实现WebSocket连接 
+```
+  public static void getOkHttp(final Activity  context, final TextView textView) {
 
-#### 7.3 WebSocket&轮询相关 
+        OkHttpClient client = new OkHttpClient();
+        /**
+         * 构造Request 对象
+         * 采用建造者模式，链式调用指明进行get请求，传入get的请求地址
+         *
+         */
+        final Request request = new Request.Builder()
+                .get()
+                .url(URL_GET_PATH1)
+                .build();
+        Call call = client.newCall(request);
 
-#### 7.4 Http缓存、Etag等标示作用 
+        //以异步的方式去执行请求,调用的是call.enqueue，将call加入调度队列，
+        // 然后等待任务执行完成，我们在Callback中即可得到结果。
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                //请求失败的处理
+            }
 
-#### 7.5  断点续传原理&Okhttp如何实现 
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                //请求成功返回结果
+                //如果希望返回的是字符串
+                final String responseData=response.body().string();
+                //如果希望返回的是二进制字节数组
+                byte[] responseBytes=response.body().bytes();
+                //如果希望返回的是inputStream,有inputStream我们就可以通过IO的方式写文件.
+                InputStream responseStream=response.body().byteStream();
+                //注意，此时的线程不是ui线程，
+                // 如果此时我们要用返回的数据进行ui更新，操作控件，就要使用相关方法
+                context.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        // 更新UI的操作
+                        textView.setText(responseData);
+                    }
+                });
 
-#### 7.6 多线程下载 
+            }
+        });
+    }
 
-#### 7.7 文件上传&Okhttp如何处理文件上传 
+```
 
-#### 7.8 如何解析Json类型数据 
 
-#### 7.9 Https／对称加密&不对称加密 
+
+#### 7.2 post()方法的使用
+
+##### 7.2.1  RequestBody--json数据提交
+
+
+
+```
+
+    public static void post1(String url, String json) {
+       //上传数据的类型，Content-Type 指明了上传数据的后缀格式
+        MediaType jsonType = MediaType.parse("application/json;charset=utf-8");
+        OkHttpClient client = new OkHttpClient();
+        //封装数据格式
+        RequestBody formBody = RequestBody.create(jsonType, json);
+        final Request request = new Request.Builder()
+                .url(url)
+                .post(formBody)
+                .build();
+        Call call = client.newCall(request);
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e("TAG", "onFailure: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                Log.e("TAG", "onResponse: " + response.body().string());
+            }
+        });
+    }
+
+```
+
+#####7.3 FromBody---表单提交
+
+​        这种能满足大部分的需求，FromBody用于提交表单键值对,key-value,其作用类似于HTML中的<form>标记。比如username="LHX",age="21"等类似的键值对；这个是用HashMap
+
+```
+  public static void post2(String url) {
+        //把参数 传进map中
+        HashMap<String, String> paramsMap = new HashMap<>();
+        paramsMap.put("name", "zhuzhuzhu");
+        paramsMap.put("client", "Android");
+        paramsMap.put("id", "32564");
+        FormBody.Builder builder = new FormBody.Builder();
+        for (String key : paramsMap.keySet()) {
+            //追加表单信息
+            builder.add(key, paramsMap.get(key));
+        }
+
+        OkHttpClient okHttpClient = new OkHttpClient();
+        RequestBody formBody = builder.build();
+        Request request = new Request.Builder()
+                .url(url)
+                .post(formBody)
+                .build();
+        Call call = okHttpClient.newCall(request);
+
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "onFailure: e : " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                Log.e(TAG, "onResponse: " + response.body().string());
+            }
+        });
+    }
+```
+
+FromBody---表单提交 另一种提交数据的方式 list
+
+```
+ public static void post3(String url) {
+        List<RequestParameter> parameter = new ArrayList<>();
+        RequestParameter rp1 = new RequestParameter("name", "wang");
+        parameter.add(rp1);
+
+        RequestParameter rp2 = new RequestParameter("client", "Android");
+        parameter.add(rp2);
+
+        RequestParameter rp3 = new RequestParameter("id", "369852");
+        parameter.add(rp3);
+
+        //创建一个FormBody.Builder
+        FormBody.Builder builder = new FormBody.Builder();
+
+        if (parameter != null && parameter.size() > 0) {
+            for (RequestParameter p : parameter) {
+                builder.add(p.getName(), p.getValue());
+            }
+
+        }
+        RequestBody formbody = builder.build();
+        OkHttpClient okHttpClient = new OkHttpClient();
+        Request request = new Request.Builder()
+                .url(url)
+                .post(formbody)
+                .build();
+
+        Call call = okHttpClient.newCall(request);
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+
+                Log.e(TAG, "onFailure: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                Log.e(TAG, "onResponse: " + response.body().string());
+            }
+        });
+
+    }
+```
+
+
+
+##### 7.4 MultipartBody---文件上传
+
+​          MultipartBody可以构建与HTML文件上传格式兼容的复杂请求体。构建MultipartBody这个类时，需要手动设置type为multipart/form-data，不然无法上传<name, value>类型的form数据。 原因是MultipartBody默认的type是mixed；
+
+​        通过第二节boundary的分析，我们知道需要给图片设置Content-Type为image/png，给form类型的数据 设置Content-type为multipart/form-data
+
+[OkHttp之MultipartBody上传文件](http://www.liziyang.top/2016/12/05/OkHttp%E4%B9%8BMultipartBody%E4%B8%8A%E4%BC%A0%E6%96%87%E4%BB%B6/)
+
+```
+  public static void post5(String url,File file) {
+        OkHttpClient client = new OkHttpClient();
+        // 创建一个RequestBody，文件的类型是image/png
+        RequestBody requestBody = RequestBody.create(MediaType.parse("image/png"), file);
+        // 初始化请求体对象，设置Content-Type以及文件数据流
+        MultipartBody multipartBody = new MultipartBody.Builder()
+                // 设置type为"multipart/form-data"，不然无法上传参数
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("filename", "xxx.png", requestBody)
+                .addFormDataPart("comment", "上传一个图片哈哈哈哈")
+                .build();
+        Request request = new Request.Builder()
+                .url(url)
+                .post(multipartBody)
+                .build();
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+            }
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                System.out.println("上传返回：\n" + response.body().string());
+            }
+        });
+    }
+```
+
+另外一种写法：
+
+```
+  public static void post4(String url) {
+        File file = new File(Environment.getExternalStorageDirectory(), "balabala.png");
+       //  上传的文件类型，Content-Type指明了上传文件的后缀格式
+        MediaType media_type_png = MediaType.parse("image/png");
+        //根据文件格式，封装文件
+        RequestBody filebody = MultipartBody.create(media_type_png, file);
+        // 初始化请求体对象，设置Content-Type以及文件数据流
+        MultipartBody.Builder multiBuilder = new MultipartBody.Builder();
+
+        //参数以添加header 方式 将参数封装，否则上传参数为空
+        //设置请求体
+        multiBuilder.setType(MultipartBody.FORM);
+
+        /**
+         * 这里是封装上传图片参数
+         *
+         * 参数分别为， 请求key ，文件名称 ， RequestBody
+         *
+         * 是 MultipartBody.Builder 的 addFormDataPart 方法，是对于之前的 addPart 方法做了
+         * 做了一个封装，所以，不需要再去配置 Header 之类的。
+         */
+        multiBuilder.addFormDataPart("file", file.getName(), filebody);
+        //封装请求参数，这里最重要
+        HashMap<String, String> params = new HashMap<>();
+        params.put("client", "Android");
+        params.put("uid", "1061");
+        params.put("token", "1911173227afe098143caf4d315a436d");
+        params.put("uuid", "A000005566DA77");
+        //参数以添加header方式将参数封装，否则上传参数为空
+        if (params != null && !params.isEmpty()) {
+            for (String key : params.keySet()) {
+                multiBuilder.addPart(Headers.of("Content-Disposition", "form-data; name=\"" + key + "\""), RequestBody.create(null, params.get(key)));
+
+
+            }
+        }
+        RequestBody multiBody = multiBuilder.build();
+        OkHttpClient okHttpClient = new OkHttpClient();
+        Request request = new Request.Builder()
+                .url(url)
+                .post(multiBody)
+                .build();
+
+        Call call = okHttpClient.newCall(request);
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e(TAG, "onFailure: " );
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                Log.e(TAG, "onResponse: " );
+            }
+        });
+
+    }
+```
+
+
+
+
+
+### 九、 经典试题
+
+#### 9.1 HttpClient&HttpUrlConnection 
+
+#### 9.2 OkHttp来实现WebSocket连接 
+
+#### 9.3 WebSocket&轮询相关 
+
+#### 9.4 Http缓存、Etag等标示作用 
+
+#### 9.5  断点续传原理&Okhttp如何实现 
+
+#### 9.6 多线程下载 
+
+#### 9.7 文件上传&Okhttp如何处理文件上传 
+
+#### 9.8 如何解析Json类型数据 
+
+#### 9.9 Https／对称加密&不对称加密 
 
 
 
