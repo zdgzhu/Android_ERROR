@@ -24,6 +24,12 @@
 
 ​        **OKHttpClient**，我们在这里对它进行各种设置，实现各种不同形式的网络请求，每个OKHttpClient内部都维护了属于自己的任务队列，连接池，Cache，拦截器等。所以在使用OkHttp作为网络框架时应该全局共享一个OkHttpClient实例。 
 
+#### 1.2 流程图
+
+![](D:\AndroidFile\Photo\OkHttp\okhttp_流程图02.png)
+
+
+
 ### 二、OkHttp使用方法简介
 
 #### 2.1 OkHttp同步方法总结
